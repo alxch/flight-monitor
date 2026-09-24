@@ -1,0 +1,20 @@
+{
+  "problem": null,
+  "flight": {
+    "id": "3207990",
+    "flight": "WZ 709",
+    "date": "2026-09-25",
+    "destination": "Батуми",
+    "airline": "Red Wings",
+    "aircraft": "SU95",
+    "registration": "RA89140",
+    "terminal": "1",
+    "std": "2026-09-25T07:40:00.000",
+    "etd": "2026-09-25T07:40:00.000",
+    "statusCode": "SKD",
+    "statusRu": "",
+    "boardStatus": "По расписанию",
+    "checkinPlan": "–",
+    "boardingPlan": "–"
+  }
+}
