@@ -4,7 +4,7 @@
 // из JSON API: /api/?type=departure&when=N (N=0 — сегодня, 1 — завтра по Москве).
 // WAF отдаёт 403 на запросы без браузерного User-Agent.
 //
-// Бот принимает /start, /stop, /status от любых пользователей и рассылает
+// Бот принимает /start и /stop от любых пользователей и рассылает
 // изменения всем подписчикам. Запуск длится RUN_SECONDS: всё это время бот
 // слушает Telegram (long polling), а табло проверяет раз в BOARD_INTERVAL секунд.
 // После вылета рейса бот присылает финальное сообщение и больше не проверяет табло.
@@ -345,16 +345,30 @@ function statusText() {
 
 // ---------- Команды бота ----------
 
-const HELP = [
-  "Провожаем Элю в Батуми ✈️",
-  "",
-  `Я слежу за рейсом ${target} по табло аэропорта Пулково и присылаю изменения:`,
-  "регистрация, выход, посадка, задержки, вылет.",
-  "",
-  "/start — подписаться на уведомления",
-  "/status — текущий статус рейса",
-  "/stop — отписаться",
-].join("\n");
+// "WZ 709 25.09 в 07:40, Санкт-Петербург → Батуми" — по последним данным табло.
+function flightLabel() {
+  const f = state.flight;
+  if (!f) return `${target}${FLIGHT_DATE ? ` на ${ddmm(FLIGHT_DATE + "T")}` : ""}`;
+  return `${f.flight} ${ddmm(f.std)} в ${hhmm(f.std)}, Санкт-Петербург → ${f.destination}`;
+}
+
+// Приветствие: рейс с датой, текущий статус и команды.
+function welcome(chatId, intro) {
+  const subscribed = subscribers.has(chatId);
+  return [
+    "Провожаем Элю в Батуми ✈️",
+    "",
+    `Я слежу за рейсом ${flightLabel()} по табло аэропорта Пулково и присылаю изменения:`,
+    "регистрация, выход, посадка, задержки, вылет.",
+    ...(intro ? ["", intro] : []),
+    "",
+    "Сейчас:",
+    statusText(),
+    "",
+    subscribed ? "/stop — отписаться" : "/start — подписаться на уведомления",
+    "Напишите мне что угодно — пришлю текущий статус.",
+  ].join("\n");
+}
 
 async function handleUpdate(u) {
   const msg = u.message;
@@ -368,16 +382,14 @@ async function handleUpdate(u) {
   if (cmd === "/start") {
     const isNew = !subscribers.has(chatId);
     subscribers.add(chatId);
-    await send(chatId, `${isNew ? "Вы подписаны" : "Вы уже подписаны"} на рейс ${target}.\n\n${statusText()}\n\n/stop — отписаться`);
+    await send(chatId, welcome(chatId, isNew ? "✅ Вы подписаны на уведомления." : "✅ Вы уже подписаны на уведомления."));
     if (isNew && TELEGRAM_CHAT_ID && chatId !== String(TELEGRAM_CHAT_ID))
       await send(TELEGRAM_CHAT_ID, `👤 Новый подписчик: ${who || chatId}`);
   } else if (cmd === "/stop") {
     subscribers.delete(chatId);
     await send(chatId, "Вы отписались от уведомлений. /start — подписаться снова.");
-  } else if (cmd === "/status") {
-    await send(chatId, statusText());
   } else if (msg.chat.type === "private") {
-    await send(chatId, HELP);
+    await send(chatId, welcome(chatId));
   }
 }
 
