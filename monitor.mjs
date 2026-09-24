@@ -330,6 +330,44 @@ async function checkBoard() {
 
   console.log(`[${now} МСК] ${flight ? `${flight.flight}: ${flight.boardStatus}` : state.problem}`);
   if (message) await broadcast(message);
+  await syncDescription(now);
+}
+
+// Описание бота («What can this bot do?») с текущим статусом рейса.
+// Обновляется только при изменении статуса.
+async function syncDescription(now) {
+  if (DRY_RUN || !TELEGRAM_TOKEN) return;
+  const f = state.flight;
+  let current;
+  if (state.problem === "unavailable") current = "табло Пулково недоступно";
+  else if (state.problem === "not_found" || !f) current = "рейс пока не найден на табло";
+  else {
+    current = f.boardStatus;
+    if (f.etd && f.etd !== f.std && !isDeparted(f)) current += `, вылет ожидается в ${hhmm(f.etd)}`;
+    if (f.counters && !f.gate) current += `, стойки ${f.counters}`;
+    if (f.gate && !isDeparted(f)) current += `, выход ${f.gate}`;
+  }
+  const key = `${flightLabel()}|${current}`;
+  if (state.descriptionKey === key) return;
+
+  const text = [
+    "Провожаем Элю в Батуми ✈️",
+    "",
+    `Рейс ${flightLabel()}.`,
+    "",
+    `Сейчас: ${current} (на ${hhmm(now)} МСК).`,
+    "",
+    "Слежу по официальному табло аэропорта Пулково и присылаю изменения: регистрация, выход, посадка, задержки, вылет.",
+    "",
+    "Нажмите «Старт», чтобы получать уведомления.",
+  ].join("\n").slice(0, 512);
+  try {
+    await tg("setMyDescription", { description: text });
+    state.descriptionKey = key;
+    console.log(`Описание бота обновлено: ${current}`);
+  } catch (e) {
+    console.warn(e.message);
+  }
 }
 
 // Текущий статус для ответа на команды — по последней проверке табло.
