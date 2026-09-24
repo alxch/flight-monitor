@@ -347,20 +347,19 @@ async function syncDescription(now) {
     if (f.counters && !f.gate) current += `, стойки ${f.counters}`;
     if (f.gate && !isDeparted(f)) current += `, выход ${f.gate}`;
   }
-  const key = `${flightLabel()}|${current}`;
-  if (state.descriptionKey === key) return;
-
-  const text = [
+  const build = (at) => [
     "Провожаем Элю в Батуми ✈️",
     "",
-    `Рейс ${flightLabel()}.`,
+    `Я слежу за рейсом ${flightLabel()} по табло аэропорта Пулково и присылаю изменения: регистрация, выход, посадка, задержки, вылет.`,
     "",
-    `Сейчас: ${current} (на ${hhmm(now)} МСК).`,
-    "",
-    "Слежу по официальному табло аэропорта Пулково и присылаю изменения: регистрация, выход, посадка, задержки, вылет.",
+    `Сейчас: ${current}${at}.`,
     "",
     "Нажмите «Старт», чтобы получать уведомления.",
   ].join("\n").slice(0, 512);
+  // Сравниваем текст без метки времени, чтобы не обновлять описание зря.
+  const key = build("");
+  if (state.descriptionKey === key) return;
+  const text = build(` (на ${hhmm(now)} МСК)`);
   try {
     await tg("setMyDescription", { description: text });
     state.descriptionKey = key;
@@ -389,21 +388,14 @@ function flightLabel(f = state.flight) {
   return `${f.flight} ${ddmm(f.std)} в ${hhmm(f.std)}, Санкт-Петербург → ${f.destination}`;
 }
 
-// Приветствие: рейс с датой, текущий статус и команды.
+// Ответ на сообщение: текущий статус и команда. Вводный текст — в описании бота.
 function welcome(chatId, intro) {
   const subscribed = subscribers.has(chatId);
   return [
-    "Провожаем Элю в Батуми ✈️",
-    "",
-    `Я слежу за рейсом ${flightLabel()} по табло аэропорта Пулково и присылаю изменения:`,
-    "регистрация, выход, посадка, задержки, вылет.",
-    ...(intro ? ["", intro] : []),
-    "",
-    "Сейчас:",
+    ...(intro ? [intro, ""] : []),
     statusText(),
     "",
     subscribed ? "/stop — отписаться" : "/start — подписаться на уведомления",
-    "Напишите мне что угодно — пришлю текущий статус.",
   ].join("\n");
 }
 
