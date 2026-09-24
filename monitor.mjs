@@ -300,12 +300,12 @@ async function checkBoard() {
   let message = null;
   if (flight) {
     const header = firstRun ? "Мониторинг запущен."
-      : prev.flight?.id !== flight.id ? `Отслеживается рейс ${ddmm(flight.std)}.`
+      : prev.flight?.id !== flight.id ? `Теперь отслеживается рейс ${flightLabel(flight)}.`
       : null;
     const changes = header ? [] : diff(prev.flight, flight);
     if (isDeparted(flight)) {
       const body = changes.length ? `Изменения по рейсу:\n${changes.join("\n")}\n\n` : "";
-      message = `🛫 Рейс вылетел.\n\n${body}${describe(flight)}\n\nМониторинг рейса завершён. Хорошего полёта!`;
+      message = `🛫 Рейс ${flightLabel(flight)} вылетел.\n\n${body}${describe(flight)}\n\nМониторинг рейса завершён. Хорошего полёта!`;
       state.finished = true;
     } else if (header) {
       message = `${header}\n\n${describe(flight)}`;
@@ -320,10 +320,9 @@ async function checkBoard() {
   } else {
     const problem = all.length === 0 ? "unavailable" : "not_found";
     if (prev.problem !== problem) {
-      const dateNote = FLIGHT_DATE ? ` на ${FLIGHT_DATE}` : "";
       message = problem === "unavailable"
         ? `⚠️ Табло Пулково недоступно: ${errors.join("; ")}\nСообщу, когда оно снова заработает.`
-        : `⚠️ Рейс ${target}${dateNote} не найден на табло Пулково (сегодня/завтра).\nСообщу, когда он появится.`;
+        : `⚠️ Рейс ${flightLabel()} не найден на табло Пулково.\nСообщу, когда он появится.`;
     }
     state.problem = problem;
   }
@@ -336,9 +335,9 @@ async function checkBoard() {
 // Текущий статус для ответа на команды — по последней проверке табло.
 function statusText() {
   if (state.flight && state.finished)
-    return `Рейс уже вылетел, мониторинг завершён.\n\n${describe(state.flight)}`;
+    return `Рейс ${flightLabel()} уже вылетел, мониторинг завершён.\n\n${describe(state.flight)}`;
   if (state.problem === "unavailable") return "⚠️ Табло Пулково сейчас недоступно.";
-  if (state.problem === "not_found") return `⚠️ Рейс ${target} пока не найден на табло Пулково.`;
+  if (state.problem === "not_found") return `⚠️ Рейс ${flightLabel()} пока не найден на табло Пулково.`;
   if (state.flight) return describe(state.flight);
   return "Статус ещё не получен, попробуйте через минуту.";
 }
@@ -346,9 +345,9 @@ function statusText() {
 // ---------- Команды бота ----------
 
 // "WZ 709 25.09 в 07:40, Санкт-Петербург → Батуми" — по последним данным табло.
-function flightLabel() {
-  const f = state.flight;
-  if (!f) return `${target}${FLIGHT_DATE ? ` на ${ddmm(FLIGHT_DATE + "T")}` : ""}`;
+// Без данных табло — номер и заданная дата (или «ближайший»).
+function flightLabel(f = state.flight) {
+  if (!f) return FLIGHT_DATE ? `${target} ${ddmm(FLIGHT_DATE)}` : `${target} (ближайший, сегодня/завтра)`;
   return `${f.flight} ${ddmm(f.std)} в ${hhmm(f.std)}, Санкт-Петербург → ${f.destination}`;
 }
 
