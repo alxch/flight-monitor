@@ -397,6 +397,7 @@ async function checkBoard() {
   const flight = pickFlight(rows, now);
 
   let message = null;
+  let justFinished = false;
   if (flight) {
     let header = null;
     if (announce) header = `🔄 Теперь слежу за рейсом ${flightLabel(flight)}.`;
@@ -411,6 +412,7 @@ async function checkBoard() {
         : `🛫 Рейс ${flightLabel(flight)} вылетел.\n\n${body}${describe(flight)}\n\nМониторинг рейса завершён. Хорошего полёта!`;
       if (header && header !== "Мониторинг запущен.") message = `${header}\n\n${message}`;
       state.finished = true;
+      justFinished = true;
     } else if (header) {
       message = `${header}\n${greeting(flight)}\n\n${describe(flight)}`;
     } else if (changes.length) {
@@ -437,7 +439,16 @@ async function checkBoard() {
 
   console.log(`[${now} МСК] ${flight ? `${flight.flight} (${kindOf(flight)}): ${flight.boardStatus}` : state.problem}`);
   if (message) await broadcast(message);
+  if (justFinished) await remindOwner();
   await syncProfile(now);
+}
+
+// Разовое напоминание владельцу после первого завершённого рейса.
+async function remindOwner() {
+  if (state.cloudflareReminderSent || !TELEGRAM_CHAT_ID) return;
+  await send(TELEGRAM_CHAT_ID, "🔔 Напоминание: перенести бота на Cloudflare Workers.\n" +
+    "Код уже готов в папке worker/ — напиши Claude «переносим бота на Cloudflare».");
+  state.cloudflareReminderSent = true;
 }
 
 // ---------- Тексты ----------
