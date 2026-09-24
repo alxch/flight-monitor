@@ -15,7 +15,9 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Запуск держится ~9 минут: бот отвечает на команды почти сразу,
+    # а следующий запуск по cron ждёт в очереди (concurrency) и стартует следом.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -29,10 +31,13 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           FLIGHT_NUMBER: ${{ vars.FLIGHT_NUMBER || 'WZ 709' }}
           FLIGHT_DATE: ${{ vars.FLIGHT_DATE }}
+          RUN_SECONDS: 540
         run: node monitor.mjs
 
       - name: Save state
+        if: always()
         run: |
+          [ -f state.json ] || exit 0
           git add state.json
           if git diff --cached --quiet; then
             echo "State unchanged"

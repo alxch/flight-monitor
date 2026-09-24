@@ -1,11 +1,16 @@
 # flight-monitor
 
 Следит за рейсом на [табло вылета Пулково](https://pulkovoairport.ru/passengers/departure/?when=0)
-и присылает изменения статуса и строки рейса в Telegram.
+и присылает изменения статуса и строки рейса в Telegram всем подписчикам бота.
+После вылета рейса бот присылает финальное сообщение и больше не проверяет табло.
+
+Команды бота: `/start` — подписаться, `/status` — текущий статус, `/stop` — отписаться.
 
 - Данные: JSON API табло `https://pulkovoairport.ru/api/?type=departure&when=0|1` (сегодня/завтра по Москве).
-- Запуск: GitHub Actions каждые 5 минут и вручную (`Actions → Flight monitor → Run workflow`).
+- Запуск: GitHub Actions по cron каждые 5 минут и вручную (`Actions → Flight monitor → Run workflow`).
+  Каждый запуск работает ~9 минут: слушает команды бота (long polling) и проверяет табло раз в минуту.
 - Состояние между запусками хранится в `state.json` и коммитится ботом только при изменениях.
+- Список подписчиков в `state.json` зашифрован (AES-256-GCM, ключ выводится из токена бота).
 
 ## Настройка
 
@@ -13,7 +18,7 @@
 
 ```sh
 gh secret set TELEGRAM_TOKEN
-gh secret set TELEGRAM_CHAT_ID
+gh secret set TELEGRAM_CHAT_ID   # владелец: первый подписчик, узнаёт о новых
 ```
 
 Необязательные переменные репозитория (`gh variable set ...`):
