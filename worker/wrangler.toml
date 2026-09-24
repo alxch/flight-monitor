@@ -1,0 +1,19 @@
+# Бот @provozhaem_elyu_bot на Cloudflare Workers (пока не запущен — см. worker/README.md).
+name = "provozhaem-elyu-bot"
+main = "src/index.mjs"
+compatibility_date = "2026-09-01"
+
+[vars]
+FLIGHT_NUMBER = "WZ 709"
+FLIGHT_DATE = ""
+
+# Секреты (wrangler secret put ...): TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, WEBHOOK_SECRET
+
+[[d1_databases]]
+binding = "DB"
+database_name = "flight-monitor"
+database_id = "REPLACE_WITH_ID_FROM_wrangler_d1_create"
+
+# Проверка табло раз в минуту. Включается при переезде, пока бот работает на GitHub Actions.
+# [triggers]
+# crons = ["* * * * *"]
