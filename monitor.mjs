@@ -210,7 +210,7 @@ async function send(chatId, text) {
 
 async function broadcast(text) {
   console.log(`Рассылка ${subscribers.size} подписчикам:\n${text}\n`);
-  for (const id of [...subscribers]) await send(id, text);
+  for (const id of [...subscribers.keys()]) await send(id, text);
 }
 
 // ---------- Состояние ----------
@@ -234,7 +234,8 @@ function decryptSubs(blob) {
 }
 
 let state = {};
-let subscribers = new Set();
+// chat_id → { name, username } — имена нужны для /subscribers.
+let subscribers = new Map();
 let savedJson = "";
 let savedSubs = "";
 
@@ -247,22 +248,27 @@ async function loadState() {
   }
   savedJson = JSON.stringify(state);
 
-  let ids = null;
+  let data = null;
   if (state.subscribers && TELEGRAM_TOKEN) {
     try {
-      ids = decryptSubs(state.subscribers);
+      data = decryptSubs(state.subscribers);
     } catch {
       console.warn("Не удалось расшифровать подписчиков (сменился токен?) — начинаю заново");
     }
   }
-  subscribers = new Set((ids ?? [TELEGRAM_CHAT_ID || "dry-run"]).map(String));
-  savedSubs = JSON.stringify([...subscribers].sort());
+  data ??= [TELEGRAM_CHAT_ID || "dry-run"];
+  // Старый формат — массив chat_id без имён.
+  const entries = Array.isArray(data) ? data.map((id) => [id, {}]) : Object.entries(data);
+  subscribers = new Map(entries.map(([id, info]) => [String(id), info]));
+  savedSubs = subsJson();
 }
 
+const subsJson = () => JSON.stringify([...subscribers].sort(([a], [b]) => a.localeCompare(b)));
+
 async function saveState() {
-  const subsNow = JSON.stringify([...subscribers].sort());
+  const subsNow = subsJson();
   if (TELEGRAM_TOKEN && (subsNow !== savedSubs || !state.subscribers)) {
-    state.subscribers = encryptSubs([...subscribers]);
+    state.subscribers = encryptSubs(Object.fromEntries(subscribers));
     savedSubs = subsNow;
   }
   const json = JSON.stringify(state);
@@ -399,24 +405,55 @@ function welcome(chatId, intro) {
   ].join("\n");
 }
 
+const isOwner = (chatId) => Boolean(TELEGRAM_CHAT_ID) && chatId === String(TELEGRAM_CHAT_ID);
+
+// Имя и username чата (для групп — название).
+const chatInfo = (chat) => ({
+  name: chat.title || [chat.first_name, chat.last_name].filter(Boolean).join(" "),
+  username: chat.username || "",
+});
+
+const whoLabel = (id, info = {}) =>
+  `${info.name || id}${info.username ? ` (@${info.username})` : ""}`;
+
+// Список подписчиков для владельца. Имена тех, кого ещё не знаем
+// (подписались до появления имён), подтягиваем через getChat.
+async function subscribersText(ownerId) {
+  for (const [id, info] of subscribers) {
+    if (info.name || DRY_RUN) continue;
+    try {
+      subscribers.set(id, chatInfo(await tg("getChat", { chat_id: id })));
+    } catch (e) {
+      console.warn(`getChat ${id}: ${e.message}`);
+    }
+  }
+  const lines = [...subscribers].map(([id, info], i) =>
+    `${i + 1}. ${whoLabel(id, info)}${id === ownerId ? " — вы" : ""}`);
+  return lines.length ? `👥 Подписчики (${lines.length}):\n${lines.join("\n")}` : "Подписчиков нет.";
+}
+
 async function handleUpdate(u) {
   const msg = u.message;
   if (!msg?.text || !msg.chat) return;
   const chatId = String(msg.chat.id);
   const cmd = msg.text.trim().split(/\s+/)[0].split("@")[0].toLowerCase();
-  const who = [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(" ")
-    + (msg.from?.username ? ` (@${msg.from.username})` : "");
+  const info = chatInfo(msg.chat);
   console.log(`← ${chatId} ${cmd}`);
+
+  // Обновляем имя, если подписчик его сменил.
+  if (subscribers.has(chatId)) subscribers.set(chatId, info);
 
   if (cmd === "/start") {
     const isNew = !subscribers.has(chatId);
-    subscribers.add(chatId);
+    subscribers.set(chatId, info);
     await send(chatId, welcome(chatId, isNew ? "✅ Вы подписаны на уведомления." : "✅ Вы уже подписаны на уведомления."));
-    if (isNew && TELEGRAM_CHAT_ID && chatId !== String(TELEGRAM_CHAT_ID))
-      await send(TELEGRAM_CHAT_ID, `👤 Новый подписчик: ${who || chatId}`);
+    if (isNew && !isOwner(chatId) && TELEGRAM_CHAT_ID)
+      await send(TELEGRAM_CHAT_ID, `👤 Новый подписчик: ${whoLabel(chatId, info)}`);
   } else if (cmd === "/stop") {
     subscribers.delete(chatId);
     await send(chatId, "Вы отписались от уведомлений. /start — подписаться снова.");
+  } else if (cmd === "/subscribers" && isOwner(chatId)) {
+    await send(chatId, await subscribersText(chatId));
   } else if (msg.chat.type === "private") {
     await send(chatId, welcome(chatId));
   }
