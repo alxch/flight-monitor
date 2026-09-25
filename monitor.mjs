@@ -263,14 +263,16 @@ async function tg(method, params = {}, timeoutMs = 30000) {
   return body.result;
 }
 
-async function send(chatId, text) {
+// Возвращает отправленное сообщение (нужен message_id для будильника) или null.
+async function send(chatId, text, extra = {}) {
   if (DRY_RUN) {
-    console.log(`[dry-run] → ${chatId}:\n${text}\n`);
-    return;
+    console.log(`[dry-run] → ${chatId}${extra.reply_markup ? " [кнопка]" : ""}:\n${text}\n`);
+    return { message_id: Date.now() };
   }
   try {
-    await tg("sendMessage", { chat_id: chatId, text, disable_web_page_preview: true });
+    const m = await tg("sendMessage", { chat_id: chatId, text, disable_web_page_preview: true, ...extra });
     console.log(`→ ${chatId}: ${text.split("\n")[0]}`);
+    return m;
   } catch (e) {
     // 403 — пользователь заблокировал бота, 400 chat not found — чата больше нет.
     if (e.code === 403 || (e.code === 400 && /chat not found/i.test(e.message))) {
@@ -280,8 +282,13 @@ async function send(chatId, text) {
       sendErrors++;
       console.error(`Не отправлено ${chatId}: ${e.message}`);
     }
+    return null;
   }
 }
+
+// Вызов API, ошибка которого не критична (удалить/отредактировать старое сообщение).
+const tgQuiet = (method, params) =>
+  DRY_RUN ? Promise.resolve(null) : tg(method, params).catch((e) => console.warn(e.message));
 
 async function broadcast(text) {
   console.log(`Рассылка ${subscribers.size} подписчикам:\n${text}\n`);
@@ -313,6 +320,11 @@ let state = {};
 let subscribers = new Map();
 let savedJson = "";
 let savedSubs = "";
+// Активный будильник: { id, text, sent, nextAt, pending: Map(chat_id → message_id) }.
+// В state.json pending хранится зашифрованным, как подписчики.
+let alarm = null;
+let alarmPendingJson = "";
+let alarmPendingEnc = "";
 
 async function loadState() {
   try {
@@ -336,6 +348,17 @@ async function loadState() {
   const entries = Array.isArray(data) ? data.map((id) => [id, {}]) : Object.entries(data);
   subscribers = new Map(entries.map(([id, info]) => [String(id), info]));
   savedSubs = subsJson();
+
+  alarm = null;
+  if (state.alarm) {
+    try {
+      alarm = { ...state.alarm, pending: new Map(Object.entries(decryptSubs(state.alarm.pending))) };
+      alarmPendingEnc = state.alarm.pending;
+      alarmPendingJson = JSON.stringify([...alarm.pending]);
+    } catch {
+      console.warn("Не удалось расшифровать будильник — сбрасываю");
+    }
+  }
 }
 
 const subsJson = () => JSON.stringify([...subscribers].sort(([a], [b]) => a.localeCompare(b)));
@@ -345,6 +368,17 @@ async function saveState() {
   if (TELEGRAM_TOKEN && (subsNow !== savedSubs || !state.subscribers)) {
     state.subscribers = encryptSubs(Object.fromEntries(subscribers));
     savedSubs = subsNow;
+  }
+  if (alarm) {
+    const pendingJson = JSON.stringify([...alarm.pending]);
+    if (pendingJson !== alarmPendingJson || !alarmPendingEnc) {
+      alarmPendingEnc = encryptSubs(Object.fromEntries(alarm.pending));
+      alarmPendingJson = pendingJson;
+    }
+    const { id, text, sent, nextAt } = alarm;
+    state.alarm = { id, text, sent, nextAt, pending: alarmPendingEnc };
+  } else {
+    delete state.alarm;
   }
   const json = JSON.stringify(state);
   if (json === savedJson) return;
@@ -366,6 +400,7 @@ function resetFlight() {
   delete state.finishedAt;
   delete state.flightReminderSent;
   delete state.problem;
+  alarm = null;
 }
 
 // ---------- Табло ----------
@@ -399,6 +434,7 @@ async function checkBoard() {
   const flight = pickFlight(rows, now);
 
   let message = null;
+  let alarmText = null;
   let justFinished = false;
   if (flight) {
     let header = null;
@@ -415,8 +451,11 @@ async function checkBoard() {
       if (header && header !== "Мониторинг запущен.") message = `${header}\n\n${message}`;
       state.finished = true;
       justFinished = true;
+      alarm = null; // рейс улетел/прилетел — будильник о задержке больше не нужен
     } else if (header) {
       message = `${header}\n${greeting(flight)}\n\n${describe(flight)}`;
+    } else if (changes.length && alarmHeader(prevFlight, flight)) {
+      alarmText = `${alarmHeader(prevFlight, flight)}\n\nИзменения по рейсу:\n${changes.join("\n")}\n\n${describe(flight)}`;
     } else if (changes.length) {
       message = `Изменения по рейсу:\n${changes.join("\n")}\n\n${describe(flight)}`;
     } else if (prev.problem === "unavailable") {
@@ -441,6 +480,7 @@ async function checkBoard() {
 
   console.log(`[${now} МСК] ${flight ? `${flight.flight} (${kindOf(flight)}): ${flight.boardStatus}` : state.problem}`);
   if (message) await broadcast(message);
+  if (alarmText) await startAlarm(alarmText);
   await syncProfile(now);
   if (justFinished) {
     state.finishedAt = now;
@@ -463,6 +503,82 @@ async function shutdown(reason) {
       "gh workflow enable monitor.yml -R alxch/flight-monitor\n" +
       "gh workflow run monitor.yml -R alxch/flight-monitor");
   }
+}
+
+// ---------- Будильник: задержка или отмена ----------
+// Критичное изменение рассылается 10 раз с интервалом в минуту, пока подписчик
+// не нажмёт кнопку «Понятно». Каждый повтор заменяет
+// предыдущий: звук уведомления звучит снова, а в чате висит одно сообщение.
+
+const ALARM_REPEATS = 10;
+const ALARM_INTERVAL = Number(process.env.ALARM_INTERVAL || 60) * 1000;
+const ackKeyboard = (id) => ({ inline_keyboard: [[{ text: "✅ Понятно", callback_data: `ack:${id}` }]] });
+
+// Заголовок будильника, если изменение критичное: отмена, статус «Задержан»
+// или расчётное время сдвинулось на более позднее (позже расписания).
+function alarmHeader(prev, cur) {
+  const label = flightLabel(cur);
+  if (cur.statusCode === "XLD" && prev.statusCode !== "XLD") return `🚨 Рейс ${label} ОТМЕНЁН!`;
+  const delayed = (s) => s.statusCode === "DLY" || /задерж/i.test(s.statusRu || "");
+  const est = (s) => (isArrival(s) ? s.eta : s.etd) || "";
+  const sched = schedOf(cur);
+  const later = est(cur) > sched && est(prev) && est(cur) > est(prev);
+  if (!(delayed(cur) && !delayed(prev)) && !later) return null;
+  const what = isArrival(cur) ? "Прилёт" : "Вылет";
+  const time = est(cur) > sched ? `\n${what} ожидается в ${hhmm(est(cur))} (по расписанию ${hhmm(sched)}).` : "";
+  return `🚨 Рейс ${label} задержан!${time}`;
+}
+
+async function startAlarm(text) {
+  alarm = {
+    id: Date.now().toString(36),
+    text,
+    sent: 0,
+    nextAt: 0,
+    pending: new Map([...subscribers.keys()].map((id) => [id, null])),
+  };
+  console.log(`Будильник: ${text.split("\n")[0]}`);
+  await ringAlarm();
+}
+
+async function ringAlarm() {
+  alarm.sent++;
+  const last = alarm.sent >= ALARM_REPEATS;
+  const text = `${alarm.text}\n\n` + (last
+    ? `Последнее напоминание (${alarm.sent}/${ALARM_REPEATS}).`
+    : `Напоминание ${alarm.sent}/${ALARM_REPEATS} — нажмите «Понятно», чтобы остановить.`);
+  for (const [chatId, prevMsg] of [...alarm.pending]) {
+    if (!subscribers.has(chatId)) {
+      alarm.pending.delete(chatId);
+      continue;
+    }
+    if (prevMsg) await tgQuiet("deleteMessage", { chat_id: chatId, message_id: prevMsg });
+    const m = await send(chatId, text, last ? {} : { reply_markup: ackKeyboard(alarm.id) });
+    alarm.pending.set(chatId, m?.message_id ?? null);
+  }
+  alarm.nextAt = Date.now() + ALARM_INTERVAL;
+  if (last || !alarm.pending.size) alarm = null;
+}
+
+// Подтверждение от подписчика нажатием кнопки «Понятно».
+async function ackAlarm(chatId, alarmId) {
+  if (!alarm || (alarmId && alarm.id !== alarmId) || !alarm.pending.has(chatId)) return false;
+  const msgId = alarm.pending.get(chatId);
+  alarm.pending.delete(chatId);
+  console.log(`Будильник подтверждён: ${chatId}`);
+  if (msgId) await tgQuiet("editMessageText", { chat_id: chatId, message_id: msgId, text: `${alarm.text}\n\n✅ Вы подтвердили.` });
+  if (!alarm.pending.size) alarm = null;
+  return true;
+}
+
+async function handleCallback(cq) {
+  const [kind, id] = (cq.data || "").split(":");
+  const chatId = String(cq.message?.chat?.id);
+  if (kind !== "ack") return;
+  const ok = await ackAlarm(chatId, id);
+  await tgQuiet("answerCallbackQuery", { callback_query_id: cq.id, text: ok ? "Принято 👍" : "Уже неактуально" });
+  // Кнопка от старого будильника — просто убираем её.
+  if (!ok && cq.message) await tgQuiet("editMessageReplyMarkup", { chat_id: chatId, message_id: cq.message.message_id });
 }
 
 // ---------- Тексты ----------
@@ -692,6 +808,7 @@ async function handleUpdate(u) {
       await send(TELEGRAM_CHAT_ID, `👤 Новый подписчик: ${whoLabel(chatId, info)}`);
   } else if (cmd === "/stop") {
     subscribers.delete(chatId);
+    alarm?.pending.delete(chatId);
     await send(chatId, "Вы отписались от уведомлений. /start — подписаться снова.");
   } else if (cmd === "/subscribers" && isOwner(chatId)) {
     await send(chatId, await subscribersText(chatId));
@@ -702,24 +819,33 @@ async function handleUpdate(u) {
   }
 }
 
+// Для локальной проверки в DRY_RUN: TEST_UPDATES='[{...}]' — апдейты вместо Telegram.
+let testUpdates = DRY_RUN && process.env.TEST_UPDATES ? JSON.parse(process.env.TEST_UPDATES) : null;
+
 async function pollUpdates(timeoutSec) {
-  if (DRY_RUN || !TELEGRAM_TOKEN) return;
   let updates;
-  try {
-    updates = await tg("getUpdates", {
-      offset: state.updateOffset || 0,
-      timeout: timeoutSec,
-      allowed_updates: ["message"],
-    }, (timeoutSec + 15) * 1000);
-  } catch (e) {
-    console.warn(e.message);
-    await new Promise((r) => setTimeout(r, 5000));
+  if (testUpdates) {
+    [updates, testUpdates] = [testUpdates, null];
+  } else if (DRY_RUN || !TELEGRAM_TOKEN) {
     return;
+  } else {
+    try {
+      updates = await tg("getUpdates", {
+        offset: state.updateOffset || 0,
+        timeout: timeoutSec,
+        allowed_updates: ["message", "callback_query"],
+      }, (timeoutSec + 15) * 1000);
+    } catch (e) {
+      console.warn(e.message);
+      await new Promise((r) => setTimeout(r, 5000));
+      return;
+    }
   }
   for (const u of updates) {
     state.updateOffset = u.update_id + 1;
     try {
-      await handleUpdate(u);
+      if (u.callback_query) await handleCallback(u.callback_query);
+      else await handleUpdate(u);
     } catch (e) {
       console.error("Ошибка обработки сообщения:", e);
     }
@@ -777,7 +903,12 @@ async function main() {
       await saveState();
     }
     if (state.shutdown) break;
-    const waitSec = Math.floor((Math.min(nextBoard, deadline) - Date.now()) / 1000);
+    if (alarm && Date.now() >= alarm.nextAt) {
+      await ringAlarm();
+      await saveState();
+    }
+    const wakeAt = Math.min(nextBoard, deadline, alarm ? alarm.nextAt : Infinity);
+    const waitSec = Math.floor((wakeAt - Date.now()) / 1000);
     await pollUpdates(Math.max(0, Math.min(50, waitSec)));
     await saveState();
   } while (Date.now() < deadline && !state.shutdown);
