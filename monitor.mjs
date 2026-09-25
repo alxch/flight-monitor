@@ -364,6 +364,7 @@ function resetFlight() {
   delete state.flight;
   delete state.finished;
   delete state.finishedAt;
+  delete state.flightReminderSent;
   delete state.problem;
 }
 
@@ -754,9 +755,17 @@ async function main() {
       nextBoard = Date.now() + BOARD_INTERVAL * 1000;
       if (state.finished) {
         if (!RUN_SECONDS) console.log("Рейс завершён, табло не проверяю.");
-        // Страховка: после завершённого рейса долго нет нового /flight — останавливаемся.
         const idleSince = state.finishedAt && Date.parse(`${state.finishedAt}Z`);
-        if (!state.shutdown && idleSince && Date.parse(`${moscowNow()}Z`) - idleSince > IDLE_DAYS * 86400000)
+        const idleMs = idleSince ? Date.parse(`${moscowNow()}Z`) - idleSince : 0;
+        // Через сутки после вылета без нового /flight — напоминаем владельцу про обратный рейс.
+        if (idleMs > 86400000 && !state.flightReminderSent && TELEGRAM_CHAT_ID && !isArrival(state.flight || {})) {
+          await send(TELEGRAM_CHAT_ID, "🔔 Не забудь поставить обратный рейс Эли:\n" +
+            "/flight <номер> <дата>, например /flight WZ 710 28.09\n\n" +
+            `Без этого бот остановится через ${IDLE_DAYS - 1} дня.`);
+          state.flightReminderSent = true;
+        }
+        // Страховка: после завершённого рейса долго нет нового /flight — останавливаемся.
+        if (!state.shutdown && idleMs > IDLE_DAYS * 86400000)
           await shutdown(`${IDLE_DAYS} дней после рейса ${flightLabel()} не было команды /flight.`);
       } else {
         try {
