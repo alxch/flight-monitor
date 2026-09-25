@@ -363,6 +363,7 @@ const targetKey = () => `${target()}|${targetDate()}`;
 function resetFlight() {
   delete state.flight;
   delete state.finished;
+  delete state.finishedAt;
   delete state.problem;
 }
 
@@ -439,16 +440,28 @@ async function checkBoard() {
 
   console.log(`[${now} МСК] ${flight ? `${flight.flight} (${kindOf(flight)}): ${flight.boardStatus}` : state.problem}`);
   if (message) await broadcast(message);
-  if (justFinished) await remindOwner();
   await syncProfile(now);
+  if (justFinished) {
+    state.finishedAt = now;
+    // Эля прилетела — задача выполнена, останавливаемся, чтобы не нагружать GitHub.
+    if (isArrival(flight)) await shutdown("Эля прилетела, мониторинг завершён.");
+  }
 }
 
-// Разовое напоминание владельцу после первого завершённого рейса.
-async function remindOwner() {
-  if (state.cloudflareReminderSent || !TELEGRAM_CHAT_ID) return;
-  await send(TELEGRAM_CHAT_ID, "🔔 Напоминание: перенести бота на Cloudflare Workers.\n" +
-    "Код уже готов в папке worker/ — напиши Claude «переносим бота на Cloudflare».");
-  state.cloudflareReminderSent = true;
+// Через сколько дней после завершённого рейса без нового /flight бот останавливается.
+const IDLE_DAYS = 5;
+
+// Остановка бота: сообщение владельцу, флаг shutdown в state.json —
+// по нему workflow отключает себя и не ставит следующий запуск.
+async function shutdown(reason) {
+  state.shutdown = true;
+  console.log(`Остановка: ${reason}`);
+  if (TELEGRAM_CHAT_ID) {
+    await send(TELEGRAM_CHAT_ID, `🛑 ${reason}\nБот остановлен, чтобы не нагружать GitHub Actions.\n\n` +
+      "Включить снова — попроси Claude или выполни:\n" +
+      "gh workflow enable monitor.yml -R alxch/flight-monitor\n" +
+      "gh workflow run monitor.yml -R alxch/flight-monitor");
+  }
 }
 
 // ---------- Тексты ----------
@@ -719,6 +732,14 @@ async function main() {
   if (!DRY_RUN && !TELEGRAM_TOKEN) throw new Error("Не задан TELEGRAM_TOKEN (или DRY_RUN=1)");
   await loadState();
 
+  // После остановки workflow отключён, значит этот запуск — ручное включение.
+  // Даём новый срок ожидания /flight, иначе страховка сразу остановит бота снова.
+  if (state.shutdown) {
+    console.log("Бот включён снова после остановки");
+    delete state.shutdown;
+    if (state.finishedAt) state.finishedAt = moscowNow();
+  }
+
   // Сменили FLIGHT_NUMBER / FLIGHT_DATE в настройках — начинаем мониторинг заново.
   if (state.target && state.target !== targetKey()) {
     console.log(`Новая цель ${targetKey()} (была ${state.target})`);
@@ -733,6 +754,10 @@ async function main() {
       nextBoard = Date.now() + BOARD_INTERVAL * 1000;
       if (state.finished) {
         if (!RUN_SECONDS) console.log("Рейс завершён, табло не проверяю.");
+        // Страховка: после завершённого рейса долго нет нового /flight — останавливаемся.
+        const idleSince = state.finishedAt && Date.parse(`${state.finishedAt}Z`);
+        if (!state.shutdown && idleSince && Date.parse(`${moscowNow()}Z`) - idleSince > IDLE_DAYS * 86400000)
+          await shutdown(`${IDLE_DAYS} дней после рейса ${flightLabel()} не было команды /flight.`);
       } else {
         try {
           await checkBoard();
@@ -742,10 +767,12 @@ async function main() {
       }
       await saveState();
     }
+    if (state.shutdown) break;
     const waitSec = Math.floor((Math.min(nextBoard, deadline) - Date.now()) / 1000);
     await pollUpdates(Math.max(0, Math.min(50, waitSec)));
     await saveState();
-  } while (Date.now() < deadline);
+  } while (Date.now() < deadline && !state.shutdown);
+  await saveState();
 
   if (sendErrors) throw new Error(`Не удалось отправить ${sendErrors} сообщений`);
 }
