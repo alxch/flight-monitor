@@ -36,6 +36,7 @@ const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
 const PERSON = "Элю"; // «Провожаем Элю», «Встречаем Элю»
+const PERSON_DAT = "Эле"; // «вызывать Эле такси»
 const HOME = "Санкт-Петербург";
 
 const BOARD_URLS = {
@@ -322,7 +323,7 @@ let savedJson = "";
 let savedSubs = "";
 // Активный будильник: { id, text, sent, nextAt, pending: Map(chat_id → message_id) }.
 // В state.json pending хранится зашифрованным, как подписчики.
-let alarm = null;
+let alarms = [];
 let alarmPendingJson = "";
 let alarmPendingEnc = "";
 
@@ -349,19 +350,22 @@ async function loadState() {
   subscribers = new Map(entries.map(([id, info]) => [String(id), info]));
   savedSubs = subsJson();
 
-  alarm = null;
-  if (state.alarm) {
+  alarms = [];
+  delete state.alarm; // формат с одним будильником
+  if (state.alarms?.length && state.alarmsPending) {
     try {
-      alarm = { ...state.alarm, pending: new Map(Object.entries(decryptSubs(state.alarm.pending))) };
-      alarmPendingEnc = state.alarm.pending;
-      alarmPendingJson = JSON.stringify([...alarm.pending]);
+      const pending = decryptSubs(state.alarmsPending);
+      alarms = state.alarms.map((a) => ({ ...a, pending: new Map(Object.entries(pending[a.id] || {})) }));
+      alarmPendingEnc = state.alarmsPending;
+      alarmPendingJson = pendingJsonOf(alarms);
     } catch {
-      console.warn("Не удалось расшифровать будильник — сбрасываю");
+      console.warn("Не удалось расшифровать будильники — сбрасываю");
     }
   }
 }
 
 const subsJson = () => JSON.stringify([...subscribers].sort(([a], [b]) => a.localeCompare(b)));
+const pendingJsonOf = (list) => JSON.stringify(list.map((a) => [a.id, [...a.pending]]));
 
 async function saveState() {
   const subsNow = subsJson();
@@ -369,16 +373,18 @@ async function saveState() {
     state.subscribers = encryptSubs(Object.fromEntries(subscribers));
     savedSubs = subsNow;
   }
-  if (alarm) {
-    const pendingJson = JSON.stringify([...alarm.pending]);
+  if (alarms.length) {
+    const pendingJson = pendingJsonOf(alarms);
     if (pendingJson !== alarmPendingJson || !alarmPendingEnc) {
-      alarmPendingEnc = encryptSubs(Object.fromEntries(alarm.pending));
+      alarmPendingEnc = encryptSubs(Object.fromEntries(alarms.map((a) => [a.id, Object.fromEntries(a.pending)])));
       alarmPendingJson = pendingJson;
     }
-    const { id, text, sent, nextAt } = alarm;
-    state.alarm = { id, text, sent, nextAt, pending: alarmPendingEnc };
+    state.alarms = alarms.map(({ pending, ...rest }) => rest);
+    state.alarmsPending = alarmPendingEnc;
   } else {
-    delete state.alarm;
+    delete state.alarms;
+    delete state.alarmsPending;
+    alarmPendingEnc = "";
   }
   const json = JSON.stringify(state);
   if (json === savedJson) return;
@@ -400,7 +406,8 @@ function resetFlight() {
   delete state.finishedAt;
   delete state.flightReminderSent;
   delete state.problem;
-  alarm = null;
+  delete state.taxiReminded;
+  alarms = [];
 }
 
 // ---------- Табло ----------
@@ -451,7 +458,7 @@ async function checkBoard() {
       if (header && header !== "Мониторинг запущен.") message = `${header}\n\n${message}`;
       state.finished = true;
       justFinished = true;
-      alarm = null; // рейс улетел/прилетел — будильник о задержке больше не нужен
+      alarms = []; // рейс улетел/прилетел — будильники о нём больше не нужны
     } else if (header) {
       message = `${header}\n${greeting(flight)}\n\n${describe(flight)}`;
     } else if (changes.length && alarmHeader(prevFlight, flight)) {
@@ -529,46 +536,78 @@ function alarmHeader(prev, cur) {
   return `🚨 Рейс ${label} задержан!${time}`;
 }
 
-async function startAlarm(text) {
-  alarm = {
-    id: Date.now().toString(36),
+// Будильников может быть несколько (задержка и напоминание о такси) — каждый со своей кнопкой.
+// ownerOnly — только владельцу, независимо от подписки.
+async function startAlarm(text, { ownerOnly = false } = {}) {
+  const recipients = ownerOnly ? [String(TELEGRAM_CHAT_ID)] : [...subscribers.keys()];
+  const a = {
+    id: `${Date.now().toString(36)}${alarms.length}`,
     text,
+    ownerOnly,
     sent: 0,
     nextAt: 0,
-    pending: new Map([...subscribers.keys()].map((id) => [id, null])),
+    pending: new Map(recipients.map((id) => [id, null])),
   };
+  alarms.push(a);
   console.log(`Будильник: ${text.split("\n")[0]}`);
-  await ringAlarm();
+  await ringAlarm(a);
 }
 
-async function ringAlarm() {
-  alarm.sent++;
-  const last = alarm.sent >= ALARM_REPEATS;
-  const text = `${alarm.text}\n\n` + (last
-    ? `Последнее напоминание (${alarm.sent}/${ALARM_REPEATS}).`
-    : `Напоминание ${alarm.sent}/${ALARM_REPEATS} — нажмите «Понятно», чтобы остановить.`);
-  for (const [chatId, prevMsg] of [...alarm.pending]) {
-    if (!subscribers.has(chatId)) {
-      alarm.pending.delete(chatId);
+async function ringAlarm(a) {
+  a.sent++;
+  const last = a.sent >= ALARM_REPEATS;
+  const text = `${a.text}\n\n` + (last
+    ? `Последнее напоминание (${a.sent}/${ALARM_REPEATS}).`
+    : `Напоминание ${a.sent}/${ALARM_REPEATS} — нажмите «Понятно», чтобы остановить.`);
+  for (const [chatId, prevMsg] of [...a.pending]) {
+    if (!a.ownerOnly && !subscribers.has(chatId)) {
+      a.pending.delete(chatId);
       continue;
     }
     if (prevMsg) await tgQuiet("deleteMessage", { chat_id: chatId, message_id: prevMsg });
-    const m = await send(chatId, text, last ? {} : { reply_markup: ackKeyboard(alarm.id) });
-    alarm.pending.set(chatId, m?.message_id ?? null);
+    const m = await send(chatId, text, last ? {} : { reply_markup: ackKeyboard(a.id) });
+    a.pending.set(chatId, m?.message_id ?? null);
   }
-  alarm.nextAt = Date.now() + ALARM_INTERVAL;
-  if (last || !alarm.pending.size) alarm = null;
+  a.nextAt = Date.now() + ALARM_INTERVAL;
+  if (last || !a.pending.size) alarms = alarms.filter((x) => x !== a);
 }
 
 // Подтверждение от подписчика нажатием кнопки «Понятно».
 async function ackAlarm(chatId, alarmId) {
-  if (!alarm || (alarmId && alarm.id !== alarmId) || !alarm.pending.has(chatId)) return false;
-  const msgId = alarm.pending.get(chatId);
-  alarm.pending.delete(chatId);
+  const a = alarms.find((x) => x.id === alarmId);
+  if (!a || !a.pending.has(chatId)) return false;
+  const msgId = a.pending.get(chatId);
+  a.pending.delete(chatId);
   console.log(`Будильник подтверждён: ${chatId}`);
-  if (msgId) await tgQuiet("editMessageText", { chat_id: chatId, message_id: msgId, text: `${alarm.text}\n\n✅ Вы подтвердили.` });
-  if (!alarm.pending.size) alarm = null;
+  if (msgId) await tgQuiet("editMessageText", { chat_id: chatId, message_id: msgId, text: `${a.text}\n\n✅ Вы подтвердили.` });
+  if (!a.pending.size) alarms = alarms.filter((x) => x !== a);
   return true;
+}
+
+// Напоминание владельцу вызвать такси: за TAXI_BEFORE_MIN до вылета по расписанию
+// (регистрация открывается за ~3 ч, дорога ~40 мин — приехать за 2 ч 40 мин).
+const TAXI_BEFORE_MIN = 210;
+const ARRIVE_BEFORE_MIN = 160;
+
+async function maybeTaxiReminder() {
+  const f = state.flight;
+  if (!f || isArrival(f) || state.finished || !TELEGRAM_CHAT_ID || state.taxiReminded === f.id) return;
+  const now = Date.parse(`${moscowNow()}Z`);
+  const std = Date.parse(`${f.std}Z`);
+  if (now < std - TAXI_BEFORE_MIN * 60000) return;
+  state.taxiReminded = f.id;
+  if (now > std - 90 * 60000) return; // до вылета меньше полутора часов — поздно напоминать
+  const at = (min) => new Date(std - min * 60000).toISOString().slice(11, 16);
+  const checkin = f.checkinPlan && f.checkinPlan !== "–" ? f.checkinPlan : `${at(180)}–${at(60)} (примерно)`;
+  const arrive = now < std - ARRIVE_BEFORE_MIN * 60000
+    ? `Лучше быть в Пулково к ${at(ARRIVE_BEFORE_MIN)}.`
+    : "Выезжайте как можно скорее.";
+  await startAlarm([
+    `🚕 Пора вызывать ${PERSON_DAT} такси!`,
+    "",
+    `Рейс ${flightLabel(f)}.`,
+    `Регистрация: ${checkin}. ${arrive}`,
+  ].join("\n"), { ownerOnly: true });
 }
 
 async function handleCallback(cq) {
@@ -808,7 +847,7 @@ async function handleUpdate(u) {
       await send(TELEGRAM_CHAT_ID, `👤 Новый подписчик: ${whoLabel(chatId, info)}`);
   } else if (cmd === "/stop") {
     subscribers.delete(chatId);
-    alarm?.pending.delete(chatId);
+    for (const a of alarms) a.pending.delete(chatId);
     await send(chatId, "Вы отписались от уведомлений. /start — подписаться снова.");
   } else if (cmd === "/subscribers" && isOwner(chatId)) {
     await send(chatId, await subscribersText(chatId));
@@ -903,11 +942,10 @@ async function main() {
       await saveState();
     }
     if (state.shutdown) break;
-    if (alarm && Date.now() >= alarm.nextAt) {
-      await ringAlarm();
-      await saveState();
-    }
-    const wakeAt = Math.min(nextBoard, deadline, alarm ? alarm.nextAt : Infinity);
+    await maybeTaxiReminder();
+    for (const a of [...alarms]) if (Date.now() >= a.nextAt) await ringAlarm(a);
+    await saveState();
+    const wakeAt = Math.min(nextBoard, deadline, ...alarms.map((a) => a.nextAt));
     const waitSec = Math.floor((wakeAt - Date.now()) / 1000);
     await pollUpdates(Math.max(0, Math.min(50, waitSec)));
     await saveState();
