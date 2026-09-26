@@ -38,5 +38,6 @@
   },
   "taxiReminded": "3207990",
   "finished": true,
-  "finishedAt": "2026-09-25T07:58:58"
+  "finishedAt": "2026-09-25T07:58:58",
+  "flightReminderSent": true
 }
