@@ -465,8 +465,6 @@ async function checkBoard() {
       alarmText = `${alarmHeader(prevFlight, flight)}\n\nИзменения по рейсу:\n${changes.join("\n")}\n\n${describe(flight)}`;
     } else if (changes.length) {
       message = `Изменения по рейсу:\n${changes.join("\n")}\n\n${describe(flight)}`;
-    } else if (prev.problem === "unavailable") {
-      message = `Табло снова доступно, изменений нет.\n\n${describe(flight)}`;
     }
     state.flight = flight;
     state.problem = null;
@@ -476,10 +474,6 @@ async function checkBoard() {
       message = `🔄 Теперь слежу за рейсом ${flightLabel()}.\n` +
         "На табло Пулково его пока нет — там показаны рейсы на сегодня и завтра. " +
         "Пришлю статус, как только он появится.";
-    } else if (prev.problem !== problem) {
-      message = problem === "unavailable"
-        ? `⚠️ Табло Пулково недоступно: ${errors.join("; ")}\nСообщу, когда оно снова заработает.`
-        : `⚠️ Рейс ${flightLabel()} не найден на табло Пулково.\nСообщу, когда он появится.`;
     }
     state.problem = problem;
   }
