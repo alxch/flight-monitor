@@ -8,7 +8,7 @@
 // Рейс ищется на обоих табло: нашёлся на вылете — «Провожаем», на прилёте — «Встречаем».
 // Бот принимает /start и /stop от любых пользователей и рассылает изменения всем
 // подписчикам. Владелец (TELEGRAM_CHAT_ID) меняет рейс командой /flight и смотрит
-// список подписчиков командой /subscribers. Запуск длится RUN_SECONDS: всё это время
+// список подписчиков командой /subscribers, рассылает текущий статус командой /notify. Запуск длится RUN_SECONDS: всё это время
 // бот слушает Telegram (long polling), а табло проверяет раз в BOARD_INTERVAL секунд.
 // После вылета/прилёта бот присылает финальное сообщение и больше не проверяет табло,
 // но продолжает отвечать на команды.
@@ -59,6 +59,9 @@ const moscowNow = () =>
 
 const hhmm = (ts) => (ts ? ts.slice(11, 16) : "");
 const ddmm = (ts) => (ts ? `${ts.slice(8, 10)}.${ts.slice(5, 7)}` : "");
+// Разница в минутах между двумя московскими временами (a − b).
+const minutesBetween = (a, b) =>
+  (Date.parse(`${a.slice(0, 19)}Z`) - Date.parse(`${b.slice(0, 19)}Z`)) / 60000;
 
 async function fetchBoard(type, when) {
   const url = `${API_URL}?type=${type}&when=${when}&_=${Date.now()}`;
@@ -201,8 +204,6 @@ const LABELS = {
   belt: "Лента выдачи багажа",
   beltStart: "Выдача багажа началась",
   beltEnd: "Выдача багажа закончилась",
-  statusCode: "Код статуса",
-  statusRu: "Статус (API)",
   aircraft: "Самолёт",
   registration: "Борт",
   terminal: "Терминал",
@@ -407,6 +408,9 @@ function resetFlight() {
   delete state.flightReminderSent;
   delete state.problem;
   delete state.taxiReminded;
+  delete state.alarmEst;
+  delete state.outageSince;
+  delete state.outageNotified;
   alarms = [];
 }
 
@@ -448,10 +452,12 @@ async function checkBoard() {
     if (announce) header = `🔄 Теперь слежу за рейсом ${flightLabel(flight)}.`;
     else if (!prevFlight) header = prev.target ? `✈️ Рейс ${flightLabel(flight)} появился на табло.` : "Мониторинг запущен.";
     else if (prevFlight.id !== flight.id) header = `Теперь отслеживается рейс ${flightLabel(flight)}.`;
+    if (header) delete state.alarmEst;
     const changes = header ? [] : diff(prevFlight, flight);
+    const alarm = header ? null : alarmHeader(prevFlight, flight);
+    const body = changes.length ? `Изменения по рейсу:\n${changes.join("\n")}\n\n` : "";
 
     if (isDone(flight)) {
-      const body = changes.length ? `Изменения по рейсу:\n${changes.join("\n")}\n\n` : "";
       message = isArrival(flight)
         ? `🛬 Рейс ${flightLabel(flight)} прибыл.\n\n${body}${describe(flight)}\n\nМониторинг рейса завершён. С возвращением!`
         : `🛫 Рейс ${flightLabel(flight)} вылетел.\n\n${body}${describe(flight)}\n\nМониторинг рейса завершён. Хорошего полёта!`;
@@ -461,10 +467,10 @@ async function checkBoard() {
       alarms = []; // рейс улетел/прилетел — будильники о нём больше не нужны
     } else if (header) {
       message = `${header}\n${greeting(flight)}\n\n${describe(flight)}`;
-    } else if (changes.length && alarmHeader(prevFlight, flight)) {
-      alarmText = `${alarmHeader(prevFlight, flight)}\n\nИзменения по рейсу:\n${changes.join("\n")}\n\n${describe(flight)}`;
+    } else if (alarm) {
+      alarmText = `${alarm}\n\n${body}${describe(flight)}`;
     } else if (changes.length) {
-      message = `Изменения по рейсу:\n${changes.join("\n")}\n\n${describe(flight)}`;
+      message = `${body}${describe(flight)}`;
     }
     state.flight = flight;
     state.problem = null;
@@ -478,6 +484,7 @@ async function checkBoard() {
     state.problem = problem;
   }
   state.target = targetKey();
+  await checkOutage(now, Boolean(flight), all.length === 0, Boolean(prevFlight), errors);
 
   console.log(`[${now} МСК] ${flight ? `${flight.flight} (${kindOf(flight)}): ${flight.boardStatus}` : state.problem}`);
   if (message) await broadcast(message);
@@ -488,6 +495,29 @@ async function checkBoard() {
     // Эля прилетела — задача выполнена, останавливаемся, чтобы не нагружать GitHub.
     if (isArrival(flight)) await shutdown("Эля прилетела, мониторинг завершён.");
   }
+}
+
+// Сбой табло: оно не отвечает или из ответа пропал рейс, который там уже был.
+// Короткие сбои (на одну-две проверки) бывают часто — их не сообщаем. Если сбой
+// длится дольше OUTAGE_MIN, пишем подписчикам, и потом — когда всё восстановится.
+const OUTAGE_MIN = 30;
+
+async function checkOutage(now, found, unavailable, known, errors) {
+  if (found || (!unavailable && !known)) {
+    if (state.outageNotified) await broadcast(`✅ Табло Пулково снова работает.\n\n${statusText()}`);
+    delete state.outageSince;
+    delete state.outageNotified;
+    return;
+  }
+  state.outageSince ??= now;
+  const min = Math.round(minutesBetween(now, state.outageSince));
+  if (state.outageNotified || min < OUTAGE_MIN) return;
+  state.outageNotified = true;
+  console.log(`Сбой табло ${min} мин: ${errors.join("; ")}`);
+  const what = unavailable
+    ? `⚠️ Табло Пулково недоступно уже ${min} мин.`
+    : `⚠️ Рейс ${flightLabel()} пропал с табло Пулково ${min} мин назад.`;
+  await broadcast(`${what}\nСообщу, когда всё восстановится.`);
 }
 
 // Через сколько дней после завершённого рейса без нового /flight бот останавливается.
@@ -515,18 +545,27 @@ const ALARM_REPEATS = 10;
 const ALARM_INTERVAL = Number(process.env.ALARM_INTERVAL || 60) * 1000;
 const ackKeyboard = (id) => ({ inline_keyboard: [[{ text: "✅ Понятно", callback_data: `ack:${id}` }]] });
 
+// Расчётное время постоянно гуляет на пару минут, поэтому тревога по времени —
+// только если опоздание от расписания не меньше ALARM_DELAY_MIN и выросло
+// ещё на ALARM_STEP_MIN с прошлой тревоги (state.alarmEst).
+const ALARM_DELAY_MIN = 20;
+const ALARM_STEP_MIN = 15;
+
 // Заголовок будильника, если изменение критичное: отмена, статус «Задержан»
-// или расчётное время сдвинулось на более позднее (позже расписания).
+// или заметная задержка по расчётному времени.
 function alarmHeader(prev, cur) {
   const label = flightLabel(cur);
   if (cur.statusCode === "XLD" && prev.statusCode !== "XLD") return `🚨 Рейс ${label} ОТМЕНЁН!`;
   const delayed = (s) => s.statusCode === "DLY" || /задерж/i.test(s.statusRu || "");
-  const est = (s) => (isArrival(s) ? s.eta : s.etd) || "";
+  const est = (isArrival(cur) ? cur.eta : cur.etd) || "";
   const sched = schedOf(cur);
-  const later = est(cur) > sched && est(prev) && est(cur) > est(prev);
+  const lastAlarm = state.alarmEst || sched;
+  const later = Boolean(est) && minutesBetween(est, sched) >= ALARM_DELAY_MIN &&
+    minutesBetween(est, lastAlarm) >= ALARM_STEP_MIN;
   if (!(delayed(cur) && !delayed(prev)) && !later) return null;
+  if (est > lastAlarm) state.alarmEst = est;
   const what = isArrival(cur) ? "Прилёт" : "Вылет";
-  const time = est(cur) > sched ? `\n${what} ожидается в ${hhmm(est(cur))} (по расписанию ${hhmm(sched)}).` : "";
+  const time = est > sched ? `\n${what} ожидается в ${hhmm(est)} (по расписанию ${hhmm(sched)}).` : "";
   return `🚨 Рейс ${label} задержан!${time}`;
 }
 
@@ -638,9 +677,14 @@ function statusText() {
     const done = isArrival(state.flight) ? "уже прибыл" : "уже вылетел";
     return `Рейс ${flightLabel()} ${done}, мониторинг завершён.\n\n${describe(state.flight)}`;
   }
+  // Рейс уже видели — показываем последние данные, даже если табло сейчас сбоит.
+  if (state.flight) {
+    const note = state.problem === "unavailable"
+      ? "\n\n⚠️ Табло Пулково сейчас недоступно, это последние известные данные." : "";
+    return describe(state.flight) + note;
+  }
   if (state.problem === "unavailable") return "⚠️ Табло Пулково сейчас недоступно.";
   if (state.problem === "not_found") return `⚠️ Рейс ${flightLabel()} пока не найден на табло Пулково.`;
-  if (state.flight) return describe(state.flight);
   return "Статус ещё не получен, попробуйте через минуту.";
 }
 
@@ -653,8 +697,7 @@ async function syncProfile(now) {
 
   let current;
   if (state.finished && f) current = isArrival(f) ? `прибыл в ${hhmm(f.ata || f.onblock)}` : f.boardStatus;
-  else if (state.problem === "unavailable") current = "табло Пулково недоступно";
-  else if (state.problem === "not_found" || !f) current = "рейс пока не найден на табло";
+  else if (!f) current = state.problem === "unavailable" ? "табло Пулково недоступно" : "рейс пока не найден на табло";
   else if (isArrival(f)) {
     current = f.boardStatus;
     if (f.eta && f.eta !== f.sta) current += `, прилёт ожидается в ${hhmm(f.eta)}`;
@@ -754,6 +797,8 @@ const FLIGHT_HELP = [
   "/flight WZ 710 — ближайший рейс (сегодня/завтра)",
   "Дата: 28.09, 28.09.2026, 2026-09-28, сегодня, завтра.",
   "Рейс ищется на табло вылета и прилёта Пулково; подписчики получат уведомление.",
+  "",
+  "/notify — разослать подписчикам текущий статус рейса.",
 ].join("\n");
 
 // Разбор даты по Москве: "28.09", "28.09.2026", "2026-09-28", "сегодня", "завтра".
@@ -845,6 +890,9 @@ async function handleUpdate(u) {
     await send(chatId, "Вы отписались от уведомлений. /start — подписаться снова.");
   } else if (cmd === "/subscribers" && isOwner(chatId)) {
     await send(chatId, await subscribersText(chatId));
+  } else if (cmd === "/notify" && isOwner(chatId)) {
+    await broadcast(`ℹ️ Текущий статус рейса.\n${greeting()}\n\n${statusText()}`);
+    await send(chatId, `✅ Статус разослан подписчикам (${subscribers.size}).`);
   } else if (cmd === "/flight" && isOwner(chatId)) {
     await handleFlightCommand(chatId, rest.join(" "));
   } else if (msg.chat.type === "private") {
