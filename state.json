@@ -1,43 +1,16 @@
 {
-  "problem": null,
-  "flight": {
-    "kind": "departure",
-    "id": "3207990",
-    "flight": "WZ 709",
-    "date": "2026-09-25",
-    "from": "Санкт-Петербург",
-    "to": "Батуми",
-    "destination": "Батуми",
-    "airline": "Red Wings",
-    "aircraft": "SU95",
-    "registration": "RA89140",
-    "terminal": "1",
-    "std": "2026-09-25T07:40:00.000",
-    "etd": "2026-09-25T07:40:00.000",
-    "offblock": "2026-09-25T07:57:00.000",
-    "statusCode": "OFB",
-    "statusRu": "",
-    "boardStatus": "Отправлен в 07:57",
-    "counters": "57-58",
-    "checkinPlan": "05:40–07:00",
-    "checkinStarted": "2026-09-25T05:40:09.000",
-    "checkinEnded": "2026-09-25T07:00:00.000",
-    "gate": "63",
-    "boardingPlan": "07:00–07:15",
-    "boardingStarted": "2026-09-25T07:13:09.000",
-    "boardingEnded": "2026-09-25T07:26:47.000"
-  },
-  "target": "WZ 709|",
+  "target": "WZ 710|2026-09-28",
   "subscribers": "XgtKZ2YjlYAhnS/0EEsx13AmjsWkf+rcUzZH3XUlv6JzozWN8GsC91cBRRqgunBbyT3XQiGb9LvskjaiMaQkNrzX9vHyH09Jh+RomnpIjUeIZyPWjqCREZbyE6kcJoXZvOsFuIRTn3YJWW9ScBedKN4y+dnWe7cEnk2EJHYcsC2qT4jd9m2dV/gNhngJLaKA8HcP0huN1sTR6cNVLfj/P6QrSLePI+2JNik=",
-  "updateOffset": 124420785,
+  "updateOffset": 124420787,
   "descriptionKey": "Провожаем Элю в Батуми ✈️\n\nЯ слежу за рейсом WZ 709 25.09 в 07:40, Санкт-Петербург → Батуми по табло аэропорта Пулково и присылаю изменения: регистрация, выход, посадка, задержки, вылет.\n\nСейчас: По расписанию.\n\nНажмите «Старт», чтобы получать уведомления.",
   "profile": {
-    "name": "Провожаем Элю · WZ 709 25.09 → Батуми",
-    "short": "Провожаем Элю ✈️ Санкт-Петербург → Батуми. Рейс WZ 709, 25.09 07:40 — статус с табло Пулково",
-    "description": "Провожаем Элю ✈️ Санкт-Петербург → Батуми\n\nЯ слежу за рейсом WZ 709 25.09 в 07:40, Санкт-Петербург → Батуми по табло аэропорта Пулково и присылаю изменения: регистрация, выход, посадка, задержки, вылет.\n\nСейчас: Отправлен в 07:57.\n\nНажмите «Старт», чтобы получать уведомления."
+    "name": "Рейс WZ 710 28.09",
+    "short": "Рейс WZ 710 28.09 — статус с табло Пулково",
+    "description": "Следим за рейсом ✈️ WZ 710\n\nЯ слежу за рейсом WZ 710 28.09 по табло аэропорта Пулково и присылаю изменения: регистрация, выход, посадка, задержки, вылет.\n\nСейчас: рейс пока не найден на табло.\n\nНажмите «Старт», чтобы получать уведомления."
   },
-  "taxiReminded": "3207990",
-  "finished": true,
-  "finishedAt": "2026-09-25T07:58:58",
-  "flightReminderSent": true
+  "config": {
+    "flight": "WZ 710",
+    "date": "2026-09-28"
+  },
+  "problem": "not_found"
 }
