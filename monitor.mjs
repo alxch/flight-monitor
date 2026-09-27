@@ -405,8 +405,9 @@ async function loadState() {
   // Старый формат — массив chat_id без имён.
   const entries = Array.isArray(data) ? data.map((id) => [id, {}]) : Object.entries(data);
   subscribers = new Map(entries.map(([id, info]) => [String(id), info]));
-  savedSubs = subsJson();
-  if (state.oldSubscribers) {
+  // При переезде список нужно перешифровать ключом нового бота, даже пустой.
+  savedSubs = migrating ? "" : subsJson();
+  if (!migrating && state.oldSubscribers) {
     try {
       oldSubscribers = new Map(Object.entries(decryptSubs(state.oldSubscribers)));
     } catch {
@@ -1042,14 +1043,13 @@ async function handleOldUpdate(u) {
   }
 }
 
-// Один раз после первого запуска нового кода: профиль старого бота — «переехал»,
+// Один раз после первого запуска нового кода: описание старого бота — «переехал» (имя не трогаем),
 // меню команд убрано, подписчикам старого — объявление без звука.
 async function announceMove() {
   if (!OLD_TELEGRAM_TOKEN || state.moveAnnounced) return;
   if (!DRY_RUN) {
     const old = (method, params = {}) =>
       tg(method, params, 30000, OLD_TELEGRAM_TOKEN).catch((e) => console.warn(`Старый бот: ${e.message}`));
-    await old("setMyName", { name: `Бот переехал → @${NEW_BOT}` });
     await old("setMyShortDescription", { short_description: `Бот переехал: @${NEW_BOT} — там всё то же самое.` });
     await old("setMyDescription", {
       description: `📢 Бот переехал: @${NEW_BOT}\n\nЭто тот же бот, только с другим именем — всё работает так же. ` +
