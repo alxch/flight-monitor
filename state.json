@@ -1,13 +1,7 @@
 {
   "target": "WZ 710|2026-09-28",
   "subscribers": "AlxP8qK6CEuR0JInet3Yhk8kIF/qMqmP0om/2lR23ZVHQiK5XW7VOVYnnXx2TNcoWv+Bp/S7reyv1OGATi1R4v97uJ2u+VZdvwrPlbvjBhfm9yrjkNgr9ceNbc+2guPlytmqqzEUv5SH5n1p/zkp5Jbr8fQZJGHAjpaZQ0IRr1A9P3w83cNVz44AhJsYf0u+3BS1hwMaRVlW6bdnRngDdEfsbn66xqAz9gWtlgrPPgGB4VHyhmHkJcQ+XZiSObd96X2jbU84UNogLueOwvWWrVyrjtRz",
-  "updateOffset": 124420794,
   "descriptionKey": "Провожаем Элю в Батуми ✈️\n\nЯ слежу за рейсом WZ 709 25.09 в 07:40, Санкт-Петербург → Батуми по табло аэропорта Пулково и присылаю изменения: регистрация, выход, посадка, задержки, вылет.\n\nСейчас: По расписанию.\n\nНажмите «Старт», чтобы получать уведомления.",
-  "profile": {
-    "name": "Встречаем Элю · WZ 710 28.09 Батуми → СПб",
-    "short": "Встречаем Элю ✈️ Батуми → Санкт-Петербург. Рейс WZ 710, 28.09 07:15 — статус с табло прилёта Пулково",
-    "description": "Встречаем Элю ✈️ Батуми → Санкт-Петербург\n\nЯ слежу за рейсом WZ 710 28.09 в 07:15, Батуми → Санкт-Петербург по табло прилёта аэропорта Пулково и присылаю изменения: вылет, задержки, прилёт, лента выдачи багажа.\n\nСейчас: Задержан, прилёт ожидается в 12:50, лента 6.\n\nНажмите «Старт», чтобы получать уведомления."
-  },
   "config": {
     "flight": "WZ 710",
     "date": "2026-09-28"
@@ -31,5 +25,9 @@
     "boardStatus": "Задержан",
     "belt": "6"
   },
-  "alarmEst": "2026-09-28T12:50:00.000"
+  "alarmEst": "2026-09-28T12:50:00.000",
+  "oldUpdateOffset": 124420794,
+  "profile": {},
+  "moveAnnounced": true,
+  "oldSubscribers": "dloCW79/juHeiuOqt8O/LauN7OgMq9stBiuHNoinYPeJg9YLwjWLMWwmjOQqACt9GuqFQumwN3t5Gopmz70y62o/LeUQFz65qAS9IddN3T6l3NoxLaBYLkWsNHcoR6zUfYZhR20zo+gDRrJyy2DceWwvf3jUw7RHwtMbWtJepTnKrR77og6ZVDfgVO84aBhtFpX33w3oJAh+o5s5CSArJ5YpbGcRHaIr+Xw8tkedDv/7tU2KZl6Hi5Uag7IyXkmtVrTuKh0luI+sQytHfEb3ysX9zkzv"
 }
