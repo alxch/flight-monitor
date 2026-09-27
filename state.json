@@ -12,7 +12,7 @@
     "flight": "WZ 710",
     "date": "2026-09-28"
   },
-  "problem": "not_found",
+  "problem": "unavailable",
   "flight": {
     "kind": "arrival",
     "id": "A3209870",
@@ -32,5 +32,5 @@
     "belt": "6"
   },
   "alarmEst": "2026-09-28T12:50:00.000",
-  "outageSince": "2026-09-27T19:00:07"
+  "outageSince": "2026-09-27T19:09:28"
 }
