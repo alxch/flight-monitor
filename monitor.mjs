@@ -22,7 +22,6 @@
 //   BOARD_INTERVAL   — период проверки табло в секундах, по умолчанию 60
 //   STATE_FILE       — файл состояния, по умолчанию state.json
 //   DRY_RUN=1        — без Telegram: печатать сообщения в консоль
-//   OLD_TELEGRAM_TOKEN — старый бот на время переезда (см. «Переезд» ниже)
 
 import { readFile, writeFile } from "node:fs/promises";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
@@ -35,8 +34,6 @@ const STATE_FILE = process.env.STATE_FILE || "state.json";
 const DRY_RUN = process.env.DRY_RUN === "1";
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-const OLD_TELEGRAM_TOKEN = process.env.OLD_TELEGRAM_TOKEN;
-const NEW_BOT = "elya_flight_bot";
 
 const PERSON = "Элю"; // «Провожаем Элю», «Встречаем Элю»
 const PERSON_DAT = "Эле"; // «вызывать Эле такси»
@@ -252,8 +249,8 @@ function diff(prev, cur) {
 
 let sendErrors = 0;
 
-async function tg(method, params = {}, timeoutMs = 30000, token = TELEGRAM_TOKEN) {
-  const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+async function tg(method, params = {}, timeoutMs = 30000) {
+  const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/${method}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
@@ -268,48 +265,21 @@ async function tg(method, params = {}, timeoutMs = 30000, token = TELEGRAM_TOKEN
   return body.result;
 }
 
-// ---------- Переезд на @elya_flight_bot ----------
-// На время переезда работают оба бота. Главный — новый (TELEGRAM_TOKEN): подписка, команды.
-// Старый (OLD_TELEGRAM_TOKEN) шлёт уведомления тем, кто ещё не перешёл (oldSubscribers),
-// и на входящие отвечает, что бот переехал. Получатели старого бота — chat_id с префиксом "old:".
-// Подписался в новом — из старого списка удаляется, дублей нет.
-
-const OLD = "old:";
-const isOld = (id) => String(id).startsWith(OLD);
-const route = (id) => (isOld(id)
-  ? { token: OLD_TELEGRAM_TOKEN, chatId: String(id).slice(OLD.length), list: oldSubscribers }
-  : { token: TELEGRAM_TOKEN, chatId: String(id), list: subscribers });
-const isSubscribed = (id) => { const r = route(id); return r.list.has(r.chatId); };
-
-const NEW_BOT_BUTTON = { inline_keyboard: [[{ text: "Открыть новый бот", url: `https://t.me/${NEW_BOT}` }]] };
-const MOVED_ANNOUNCE = [
-  `📢 У бота новый адрес: @${NEW_BOT}`,
-  "",
-  "Это тот же бот, только с другим именем — ничего нового, всё работает так же. " +
-    "Можно переходить уже сейчас: после подписки там сообщения отсюда приходить перестанут, дублей не будет.",
-  "",
-  "Этот бот работает до конца поездки, потом его удалим.",
-].join("\n");
-const MOVED_FINAL = `🔔 Поездка закончилась, этот бот скоро удалим. Дальше уведомления будут только в @${NEW_BOT} — ` +
-  "подпишитесь, если ещё не успели.";
-const MOVED_LINE = `📢 Бот переехал: @${NEW_BOT} — там всё то же самое.`;
-
 // Возвращает отправленное сообщение (нужен message_id для будильника) или null.
 async function send(chatId, text, extra = {}) {
   if (DRY_RUN) {
-    console.log(`[dry-run] → ${chatId}${extra.reply_markup ? " [кнопка]" : ""}${extra.disable_notification ? " [без звука]" : ""}:\n${text}\n`);
+    console.log(`[dry-run] → ${chatId}${extra.reply_markup ? " [кнопка]" : ""}:\n${text}\n`);
     return { message_id: Date.now() };
   }
-  const r = route(chatId);
   try {
-    const m = await tg("sendMessage", { chat_id: r.chatId, text, disable_web_page_preview: true, ...extra }, 30000, r.token);
+    const m = await tg("sendMessage", { chat_id: chatId, text, disable_web_page_preview: true, ...extra });
     console.log(`→ ${chatId}: ${text.split("\n")[0]}`);
     return m;
   } catch (e) {
     // 403 — пользователь заблокировал бота, 400 chat not found — чата больше нет.
     if (e.code === 403 || (e.code === 400 && /chat not found/i.test(e.message))) {
       console.warn(`Отписываю ${chatId}: ${e.message}`);
-      r.list.delete(r.chatId);
+      subscribers.delete(String(chatId));
     } else {
       sendErrors++;
       console.error(`Не отправлено ${chatId}: ${e.message}`);
@@ -319,27 +289,19 @@ async function send(chatId, text, extra = {}) {
 }
 
 // Вызов API, ошибка которого не критична (удалить/отредактировать старое сообщение).
-// chatId может быть с префиксом "old:" — тогда вызов идёт от старого бота.
-const tgQuiet = (method, { chat_id, ...params }) => {
-  if (DRY_RUN) return Promise.resolve(null);
-  const r = chat_id === undefined ? { token: TELEGRAM_TOKEN } : route(chat_id);
-  const p = chat_id === undefined ? params : { chat_id: r.chatId, ...params };
-  return tg(method, p, 30000, r.token).catch((e) => console.warn(e.message));
-};
-
-// Все получатели рассылки: подписчики нового бота и те, кто остался в старом.
-const recipients = () => [...subscribers.keys(), ...[...oldSubscribers.keys()].map((id) => OLD + id)];
+const tgQuiet = (method, params) =>
+  DRY_RUN ? Promise.resolve(null) : tg(method, params).catch((e) => console.warn(e.message));
 
 async function broadcast(text) {
-  console.log(`Рассылка ${subscribers.size}+${oldSubscribers.size} подписчикам:\n${text}\n`);
-  for (const id of recipients()) await send(id, text);
+  console.log(`Рассылка ${subscribers.size} подписчикам:\n${text}\n`);
+  for (const id of [...subscribers.keys()]) await send(id, text);
 }
 
 // ---------- Состояние ----------
 // state.json лежит в публичном репозитории, поэтому подписчики (chat_id, имена)
 // хранятся зашифрованными ключом, выведенным из токена бота.
 
-const subsKey = (token = TELEGRAM_TOKEN) => createHash("sha256").update(`subscribers:${token}`).digest();
+const subsKey = () => createHash("sha256").update(`subscribers:${TELEGRAM_TOKEN}`).digest();
 
 function encryptSubs(ids) {
   const iv = randomBytes(12);
@@ -348,9 +310,9 @@ function encryptSubs(ids) {
   return Buffer.concat([iv, c.getAuthTag(), data]).toString("base64");
 }
 
-function decryptSubs(blob, token = TELEGRAM_TOKEN) {
+function decryptSubs(blob) {
   const buf = Buffer.from(blob, "base64");
-  const d = createDecipheriv("aes-256-gcm", subsKey(token), buf.subarray(0, 12));
+  const d = createDecipheriv("aes-256-gcm", subsKey(), buf.subarray(0, 12));
   d.setAuthTag(buf.subarray(12, 28));
   return JSON.parse(Buffer.concat([d.update(buf.subarray(28)), d.final()]).toString("utf8"));
 }
@@ -358,11 +320,8 @@ function decryptSubs(blob, token = TELEGRAM_TOKEN) {
 let state = {};
 // chat_id → { name, username } — имена нужны для /subscribers.
 let subscribers = new Map();
-// Те, кто ещё не перешёл в новый бот (chat_id старого бота без префикса).
-let oldSubscribers = new Map();
 let savedJson = "";
 let savedSubs = "";
-let savedOldSubs = "";
 // Активный будильник: { id, text, sent, nextAt, pending: Map(chat_id → message_id) }.
 // В state.json pending хранится зашифрованным, как подписчики.
 let alarms = [];
@@ -379,55 +338,31 @@ async function loadState() {
   savedJson = JSON.stringify(state);
 
   let data = null;
-  // Переезд: подписчики зашифрованы ключом старого бота — они становятся списком старого бота,
-  // а новый начинает с пустого списка и своих апдейтов.
-  let migrating = false;
   if (state.subscribers && TELEGRAM_TOKEN) {
     try {
       data = decryptSubs(state.subscribers);
     } catch {
-      try {
-        if (!OLD_TELEGRAM_TOKEN) throw new Error();
-        const old = decryptSubs(state.subscribers, OLD_TELEGRAM_TOKEN);
-        oldSubscribers = new Map(Object.entries(old).map(([id, info]) => [String(id), info]));
-        migrating = true;
-        data = {};
-        state.oldUpdateOffset = state.updateOffset;
-        delete state.updateOffset;
-        delete state.profile; // профиль нового бота ещё не задан
-        console.log(`Переезд: в старом боте ${oldSubscribers.size} подписчиков, новый начинает с нуля`);
-      } catch {
-        console.warn("Не удалось расшифровать подписчиков (сменился токен?) — начинаю заново");
-      }
+      console.warn("Не удалось расшифровать подписчиков (сменился токен?) — начинаю заново");
     }
   }
   data ??= [TELEGRAM_CHAT_ID || "dry-run"];
   // Старый формат — массив chat_id без имён.
   const entries = Array.isArray(data) ? data.map((id) => [id, {}]) : Object.entries(data);
   subscribers = new Map(entries.map(([id, info]) => [String(id), info]));
-  // При переезде список нужно перешифровать ключом нового бота, даже пустой.
-  savedSubs = migrating ? "" : subsJson();
-  if (!migrating && state.oldSubscribers) {
-    try {
-      oldSubscribers = new Map(Object.entries(decryptSubs(state.oldSubscribers)));
-    } catch {
-      console.warn("Не удалось расшифровать подписчиков старого бота");
-    }
-  }
-  savedOldSubs = migrating ? "" : oldSubsJson();
+  savedSubs = subsJson();
 
   alarms = [];
   delete state.alarm; // формат с одним будильником
+  // Следы переезда на @elya_flight_bot (сентябрь 2026).
+  delete state.oldSubscribers;
+  delete state.oldUpdateOffset;
+  delete state.moveAnnounced;
+  delete state.descriptionKey;
   if (state.alarms?.length && state.alarmsPending) {
     try {
-      const pending = decryptSubs(state.alarmsPending, migrating ? OLD_TELEGRAM_TOKEN : TELEGRAM_TOKEN);
-      // При переезде будильники уже звонят из старого бота — получатели становятся "old:".
-      const key = (id) => (migrating && !isOld(id) ? OLD + id : id);
-      alarms = state.alarms.map((a) => ({
-        ...a,
-        pending: new Map(Object.entries(pending[a.id] || {}).map(([id, m]) => [key(id), m])),
-      }));
-      alarmPendingEnc = migrating ? "" : state.alarmsPending;
+      const pending = decryptSubs(state.alarmsPending);
+      alarms = state.alarms.map((a) => ({ ...a, pending: new Map(Object.entries(pending[a.id] || {})) }));
+      alarmPendingEnc = state.alarmsPending;
       alarmPendingJson = pendingJsonOf(alarms);
     } catch {
       console.warn("Не удалось расшифровать будильники — сбрасываю");
@@ -436,7 +371,6 @@ async function loadState() {
 }
 
 const subsJson = () => JSON.stringify([...subscribers].sort(([a], [b]) => a.localeCompare(b)));
-const oldSubsJson = () => JSON.stringify([...oldSubscribers].sort(([a], [b]) => a.localeCompare(b)));
 const pendingJsonOf = (list) => JSON.stringify(list.map((a) => [a.id, [...a.pending]]));
 
 async function saveState() {
@@ -444,12 +378,6 @@ async function saveState() {
   if (TELEGRAM_TOKEN && (subsNow !== savedSubs || !state.subscribers)) {
     state.subscribers = encryptSubs(Object.fromEntries(subscribers));
     savedSubs = subsNow;
-  }
-  const oldNow = oldSubsJson();
-  if (TELEGRAM_TOKEN && oldNow !== savedOldSubs) {
-    if (oldSubscribers.size) state.oldSubscribers = encryptSubs(Object.fromEntries(oldSubscribers));
-    else delete state.oldSubscribers;
-    savedOldSubs = oldNow;
   }
   if (alarms.length) {
     const pendingJson = pendingJsonOf(alarms);
@@ -570,13 +498,7 @@ async function checkBoard() {
   if (justFinished) {
     state.finishedAt = now;
     // Эля прилетела — задача выполнена, останавливаемся, чтобы не нагружать GitHub.
-    if (isArrival(flight)) {
-      // Последнее напоминание о переезде — со звуком, тем, кто остался в старом боте.
-      if (OLD_TELEGRAM_TOKEN) {
-        for (const id of [...oldSubscribers.keys()]) await send(OLD + id, MOVED_FINAL, { reply_markup: NEW_BOT_BUTTON });
-      }
-      await shutdown("Эля прилетела, мониторинг завершён.");
-    }
+    if (isArrival(flight)) await shutdown("Эля прилетела, мониторинг завершён.");
   }
 }
 
@@ -668,14 +590,14 @@ async function startAlarm(text, { ownerOnly = false } = {}) {
     else await broadcast(text);
     return;
   }
-  const to = ownerOnly ? [String(TELEGRAM_CHAT_ID)] : recipients();
+  const recipients = ownerOnly ? [String(TELEGRAM_CHAT_ID)] : [...subscribers.keys()];
   const a = {
     id: `${Date.now().toString(36)}${alarms.length}`,
     text,
     ownerOnly,
     sent: 0,
     nextAt: 0,
-    pending: new Map(to.map((id) => [id, null])),
+    pending: new Map(recipients.map((id) => [id, null])),
   };
   alarms.push(a);
   console.log(`Будильник: ${text.split("\n")[0]}`);
@@ -689,7 +611,7 @@ async function ringAlarm(a) {
     ? `Последнее напоминание (${a.sent}/${ALARM_REPEATS}).`
     : `Напоминание ${a.sent}/${ALARM_REPEATS} — нажмите «Понятно», чтобы остановить.`);
   for (const [chatId, prevMsg] of [...a.pending]) {
-    if (!a.ownerOnly && !isSubscribed(chatId)) {
+    if (!a.ownerOnly && !subscribers.has(chatId)) {
       a.pending.delete(chatId);
       continue;
     }
@@ -739,15 +661,12 @@ async function maybeTaxiReminder() {
   ].join("\n"), { ownerOnly: true });
 }
 
-async function handleCallback(cq, old = false) {
+async function handleCallback(cq) {
   const [kind, id] = (cq.data || "").split(":");
-  const chatId = (old ? OLD : "") + String(cq.message?.chat?.id);
+  const chatId = String(cq.message?.chat?.id);
   if (kind !== "ack") return;
   const ok = await ackAlarm(chatId, id);
-  if (!DRY_RUN) {
-    await tg("answerCallbackQuery", { callback_query_id: cq.id, text: ok ? "Принято 👍" : "Уже неактуально" },
-      30000, route(chatId).token).catch((e) => console.warn(e.message));
-  }
+  await tgQuiet("answerCallbackQuery", { callback_query_id: cq.id, text: ok ? "Принято 👍" : "Уже неактуально" });
   // Кнопка от старого будильника — просто убираем её.
   if (!ok && cq.message) await tgQuiet("editMessageReplyMarkup", { chat_id: chatId, message_id: cq.message.message_id });
 }
@@ -887,25 +806,7 @@ async function subscribersText(ownerId) {
   }
   const lines = [...subscribers].map(([id, info], i) =>
     `${i + 1}. ${whoLabel(id, info)}${id === ownerId ? " — вы" : ""}`);
-  const old = [...oldSubscribers].map(([id, info], i) =>
-    `${i + 1}. ${whoLabel(id, info)}${id === ownerId ? " — вы" : ""}`);
-  return [
-    lines.length ? `👥 Подписчики (${lines.length}):\n${lines.join("\n")}` : "Подписчиков нет.",
-    ...(old.length ? ["", `Ещё не перешли из старого бота (${old.length}):\n${old.join("\n")}`] : []),
-  ].join("\n");
-}
-
-// Меню команд владельца. Telegram принимает его, только когда владелец уже нажал «Старт».
-async function setOwnerCommands() {
-  if (DRY_RUN || !TELEGRAM_CHAT_ID) return;
-  const commands = [
-    ["start", "Подписаться на уведомления"],
-    ["stop", "Отписаться"],
-    ["flight", "Сменить рейс и дату (владелец)"],
-    ["subscribers", "Список подписчиков (владелец)"],
-    ["notify", "Разослать текущий статус (владелец)"],
-  ].map(([command, description]) => ({ command, description }));
-  await tgQuiet("setMyCommands", { scope: { type: "chat", chat_id: Number(TELEGRAM_CHAT_ID) }, commands });
+  return lines.length ? `👥 Подписчики (${lines.length}):\n${lines.join("\n")}` : "Подписчиков нет.";
 }
 
 const FLIGHT_HELP = [
@@ -998,16 +899,9 @@ async function handleUpdate(u) {
   if (cmd === "/start") {
     const isNew = !subscribers.has(chatId);
     subscribers.set(chatId, info);
-    // Перешёл из старого бота — старый ему больше не пишет.
-    const moved = oldSubscribers.delete(chatId);
-    for (const a of alarms) a.pending.delete(OLD + chatId);
     await send(chatId, welcome(chatId, isNew ? "✅ Вы подписаны на уведомления." : "✅ Вы уже подписаны на уведомления."));
-    if (isOwner(chatId)) await setOwnerCommands();
-    else if (isNew && TELEGRAM_CHAT_ID) {
-      await send(TELEGRAM_CHAT_ID, moved
-        ? `👤 Перешёл в новый бот: ${whoLabel(chatId, info)} (в старом осталось: ${oldSubscribers.size})`
-        : `👤 Новый подписчик: ${whoLabel(chatId, info)}`);
-    }
+    if (isNew && !isOwner(chatId) && TELEGRAM_CHAT_ID)
+      await send(TELEGRAM_CHAT_ID, `👤 Новый подписчик: ${whoLabel(chatId, info)}`);
   } else if (cmd === "/stop") {
     subscribers.delete(chatId);
     for (const a of alarms) a.pending.delete(chatId);
@@ -1024,82 +918,8 @@ async function handleUpdate(u) {
   }
 }
 
-// Старый бот: новых подписчиков не принимает, админ-команд нет. На любое сообщение —
-// текущий статус и ссылка на новый бот; /stop — отписка от старого.
-async function handleOldUpdate(u) {
-  const msg = u.message;
-  if (!msg?.text || !msg.chat) return;
-  const chatId = String(msg.chat.id);
-  const cmd = msg.text.trim().split(/\s+/)[0].split("@")[0].toLowerCase();
-  console.log(`← ${OLD}${chatId} ${cmd}`);
-  if (msg.chat.type !== "private" && !cmd.startsWith("/")) return;
-  if (oldSubscribers.has(chatId)) oldSubscribers.set(chatId, chatInfo(msg.chat));
-  if (cmd === "/stop") {
-    oldSubscribers.delete(chatId);
-    for (const a of alarms) a.pending.delete(OLD + chatId);
-    await send(OLD + chatId, `Вы отписались от уведомлений.\n\n${MOVED_LINE}`, { reply_markup: NEW_BOT_BUTTON });
-  } else {
-    await send(OLD + chatId, `${statusText()}\n\n${MOVED_LINE}`, { reply_markup: NEW_BOT_BUTTON });
-  }
-}
-
-// Один раз после первого запуска нового кода: описание старого бота — «переехал» (имя не трогаем),
-// меню команд убрано, подписчикам старого — объявление без звука.
-async function announceMove() {
-  if (!OLD_TELEGRAM_TOKEN || state.moveAnnounced) return;
-  if (!DRY_RUN) {
-    const old = (method, params = {}) =>
-      tg(method, params, 30000, OLD_TELEGRAM_TOKEN).catch((e) => console.warn(`Старый бот: ${e.message}`));
-    await old("setMyShortDescription", { short_description: `Бот переехал: @${NEW_BOT} — там всё то же самое.` });
-    await old("setMyDescription", {
-      description: `📢 Бот переехал: @${NEW_BOT}\n\nЭто тот же бот, только с другим именем — всё работает так же. ` +
-        "Этот бот работает до конца поездки, потом его удалим.",
-    });
-    await old("deleteMyCommands");
-    if (TELEGRAM_CHAT_ID) await old("deleteMyCommands", { scope: { type: "chat", chat_id: Number(TELEGRAM_CHAT_ID) } });
-  }
-  console.log(`Объявление о переезде: ${oldSubscribers.size} подписчикам старого бота`);
-  for (const id of [...oldSubscribers.keys()]) {
-    await send(OLD + id, MOVED_ANNOUNCE, { reply_markup: NEW_BOT_BUTTON, disable_notification: true });
-  }
-  state.moveAnnounced = true;
-}
-
-// Для локальной проверки в DRY_RUN: TEST_UPDATES='[{...}]' — апдейты вместо Telegram,
-// TEST_OLD_UPDATES — то же для старого бота.
+// Для локальной проверки в DRY_RUN: TEST_UPDATES='[{...}]' — апдейты вместо Telegram.
 let testUpdates = DRY_RUN && process.env.TEST_UPDATES ? JSON.parse(process.env.TEST_UPDATES) : null;
-let testOldUpdates = DRY_RUN && process.env.TEST_OLD_UPDATES ? JSON.parse(process.env.TEST_OLD_UPDATES) : null;
-
-// Апдейты старого бота — без ожидания (long polling держит новый бот).
-async function pollOldUpdates() {
-  let updates;
-  if (testOldUpdates) {
-    [updates, testOldUpdates] = [testOldUpdates, null];
-  } else if (DRY_RUN || !OLD_TELEGRAM_TOKEN) {
-    return;
-  } else {
-    try {
-      updates = await tg("getUpdates", {
-        offset: state.oldUpdateOffset || 0,
-        timeout: 0,
-        allowed_updates: ["message", "callback_query"],
-      }, 15000, OLD_TELEGRAM_TOKEN);
-    } catch (e) {
-      console.warn(`Старый бот: ${e.message}`);
-      return;
-    }
-  }
-  for (const u of updates) {
-    state.oldUpdateOffset = u.update_id + 1;
-    try {
-      if (u.callback_query) await handleCallback(u.callback_query, true);
-      else await handleOldUpdate(u);
-    } catch (e) {
-      console.error("Ошибка обработки сообщения (старый бот):", e);
-    }
-    await saveState();
-  }
-}
 
 async function pollUpdates(timeoutSec) {
   let updates;
@@ -1179,8 +999,6 @@ async function main() {
           console.error("Ошибка проверки табло:", e);
         }
       }
-      // Профиль нового бота уже обновлён проверкой табло — можно звать туда подписчиков.
-      await announceMove();
       await saveState();
     }
     if (state.shutdown) break;
@@ -1189,9 +1007,7 @@ async function main() {
     await saveState();
     const wakeAt = Math.min(nextBoard, deadline, ...alarms.map((a) => a.nextAt));
     const waitSec = Math.floor((wakeAt - Date.now()) / 1000);
-    // Пока работает старый бот, ждём коротко, чтобы и он отвечал без долгой задержки.
-    await pollUpdates(Math.max(0, Math.min(OLD_TELEGRAM_TOKEN ? 10 : 50, waitSec)));
-    await pollOldUpdates();
+    await pollUpdates(Math.max(0, Math.min(50, waitSec)));
     await saveState();
   } while (Date.now() < deadline && !state.shutdown);
   await saveState();
