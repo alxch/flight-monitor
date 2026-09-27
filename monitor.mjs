@@ -537,7 +537,7 @@ async function shutdown(reason) {
 }
 
 // ---------- Будильник: задержка или отмена ----------
-// Критичное изменение рассылается 10 раз с интервалом в минуту, пока подписчик
+// Ночью (23:00–08:00 МСК) критичное изменение рассылается 10 раз с интервалом в минуту, пока подписчик
 // не нажмёт кнопку «Понятно». Каждый повтор заменяет
 // предыдущий: звук уведомления звучит снова, а в чате висит одно сообщение.
 
@@ -569,9 +569,22 @@ function alarmHeader(prev, cur) {
   return `🚨 Рейс ${label} задержан!${time}`;
 }
 
+// Повторы нужны, только чтобы разбудить: днём тревога приходит одним обычным сообщением.
+const NIGHT_FROM = 23;
+const NIGHT_TO = 8;
+const isNight = () => {
+  const h = Number(moscowNow().slice(11, 13));
+  return h >= NIGHT_FROM || h < NIGHT_TO;
+};
+
 // Будильников может быть несколько (задержка и напоминание о такси) — каждый со своей кнопкой.
 // ownerOnly — только владельцу, независимо от подписки.
 async function startAlarm(text, { ownerOnly = false } = {}) {
+  if (!isNight()) {
+    if (ownerOnly) await send(TELEGRAM_CHAT_ID, text);
+    else await broadcast(text);
+    return;
+  }
   const recipients = ownerOnly ? [String(TELEGRAM_CHAT_ID)] : [...subscribers.keys()];
   const a = {
     id: `${Date.now().toString(36)}${alarms.length}`,
