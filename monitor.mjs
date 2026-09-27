@@ -464,7 +464,8 @@ async function checkBoard() {
 
     if (isDone(flight)) {
       message = isArrival(flight)
-        ? `🛬 Рейс ${flightLabel(flight)} прибыл.\n\n${body}${describe(flight)}\n\nМониторинг рейса завершён. С возвращением!`
+        ? `🛬 Рейс ${flightLabel(flight)} прибыл.\n\n${body}${describe(flight)}\n\nМониторинг рейса завершён. С возвращением!\n\n` +
+          "Бот засыпает до следующей поездки. Когда появится новый рейс, пришлю сообщение — ничего делать не нужно."
         : `🛫 Рейс ${flightLabel(flight)} вылетел.\n\n${body}${describe(flight)}\n\nМониторинг рейса завершён. Хорошего полёта!`;
       if (header && header !== "Мониторинг запущен.") message = `${header}\n\n${message}`;
       state.finished = true;
