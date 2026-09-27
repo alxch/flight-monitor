@@ -219,20 +219,22 @@ const TIME_FIELDS = new Set([
 ]);
 const fmt = (k, v) => (!v ? "—" : TIME_FIELDS.has(k) ? hhmm(v) : v);
 
-function describe(s) {
+// Строка рейса. title: false — рейс уже назван в заголовке сообщения;
+// brief — заголовок уже говорит и рейс, и статус, и новое время (будильник, «прибыл», «вылетел»).
+function describe(s, { title = true, brief = false } = {}) {
   const sched = schedOf(s);
   const lines = [
-    `✈️ ${s.flight} ${ddmm(sched)} ${hhmm(sched)} ${fromOf(s)} → ${toOf(s)}`,
+    ...(title && !brief ? [`✈️ ${s.flight} ${ddmm(sched)} ${hhmm(sched)} ${fromOf(s)} → ${toOf(s)}`] : []),
     `${s.airline}, ${s.aircraft}${s.registration ? ` (${s.registration})` : ""}`,
-    `Статус: ${s.boardStatus}`,
+    ...(brief ? [] : [`Статус: ${s.boardStatus}`]),
   ];
   if (isArrival(s)) {
-    if (s.eta && s.eta !== s.sta && !s.ata) lines.push(`Расчётное время прилёта: ${hhmm(s.eta)}`);
+    if (s.eta && s.eta !== s.sta && !s.ata && !brief) lines.push(`Расчётное время прилёта: ${hhmm(s.eta)}`);
     if (s.originAtd) lines.push(`Вылет из пункта отправления: ${hhmm(s.originAtd)}`);
     if (s.ata) lines.push(`Фактический прилёт: ${hhmm(s.ata)}`);
     if (s.belt) lines.push(`Лента выдачи багажа: ${s.belt}`);
   } else {
-    if (s.etd && s.etd !== s.std) lines.push(`Расчётное время: ${hhmm(s.etd)}`);
+    if (s.etd && s.etd !== s.std && !brief) lines.push(`Расчётное время: ${hhmm(s.etd)}`);
     if (s.counters) lines.push(`Стойки регистрации: ${s.counters}${s.checkinPlan !== "–" ? ` (${s.checkinPlan})` : ""}`);
     if (s.gate) lines.push(`Выход: ${s.gate}${s.boardingPlan !== "–" ? ` (посадка ${s.boardingPlan})` : ""}`);
     if (s.atd) lines.push(`Фактический вылет: ${hhmm(s.atd)}`);
@@ -455,9 +457,10 @@ async function checkBoard() {
   let justFinished = false;
   if (flight) {
     let header = null;
-    if (announce) header = `🔄 Теперь слежу за рейсом ${flightLabel(flight)}.`;
-    else if (!prevFlight) header = prev.target ? `✈️ Рейс ${flightLabel(flight)} появился на табло.` : "Мониторинг запущен.";
-    else if (prevFlight.id !== flight.id) header = `Теперь отслеживается рейс ${flightLabel(flight)}.`;
+    const who = `${verb(flight)} ${PERSON}`;
+    if (announce) header = `🔄 ${who}: теперь слежу за рейсом ${flightLabel(flight)}.`;
+    else if (!prevFlight) header = prev.target ? `✈️ ${who}: рейс ${flightLabel(flight)} появился на табло.` : "Мониторинг запущен.";
+    else if (prevFlight.id !== flight.id) header = `🔄 ${who}: теперь слежу за рейсом ${flightLabel(flight)}.`;
     if (header) delete state.alarmEst;
     const changes = header ? [] : diff(prevFlight, flight);
     const alarm = header ? null : alarmHeader(prevFlight, flight);
@@ -465,16 +468,17 @@ async function checkBoard() {
 
     if (isDone(flight)) {
       message = isArrival(flight)
-        ? `🛬 Рейс ${flightLabel(flight)} прибыл.\n\n${body}${describe(flight)}\n\nМониторинг рейса завершён. С возвращением!\n\n${SLEEP_NOTE}`
-        : `🛫 Рейс ${flightLabel(flight)} вылетел.\n\n${body}${describe(flight)}\n\nМониторинг рейса завершён. Хорошего полёта!`;
-      if (header && header !== "Мониторинг запущен.") message = `${header}\n\n${message}`;
+        ? `🛬 Рейс ${flightLabel(flight)} прибыл.\n\n${describe(flight, { brief: true })}\n\n` +
+          "С возвращением! Бот засыпает до следующей поездки — когда появится новый рейс, пришлю сообщение."
+        : `🛫 Рейс ${flightLabel(flight)} вылетел.\n\n${describe(flight, { brief: true })}\n\nХорошего полёта!`;
       state.finished = true;
       justFinished = true;
       alarms = []; // рейс улетел/прилетел — будильники о нём больше не нужны
     } else if (header) {
-      message = `${header}\n${greeting(flight)}\n\n${describe(flight)}`;
+      message = `${header}\n\n${describe(flight, { title: header === "Мониторинг запущен." })}`;
     } else if (alarm) {
-      alarmText = `${alarm}\n\n${body}${describe(flight)}`;
+      // Список изменений не нужен: статус и новое время — в заголовке, остальное — в строке рейса.
+      alarmText = `${alarm}\n\n${describe(flight, { brief: true })}`;
     } else if (changes.length) {
       message = `${body}${describe(flight)}`;
     }
@@ -699,7 +703,7 @@ const greeting = (f = state.flight) =>
 function statusText() {
   if (state.flight && state.finished) {
     const done = isArrival(state.flight) ? "уже прибыл" : "уже вылетел";
-    return `Рейс ${flightLabel()} ${done}, мониторинг завершён.\n\n${describe(state.flight)}`;
+    return `Рейс ${flightLabel()} ${done}, мониторинг завершён.\n\n${describe(state.flight, { title: false })}`;
   }
   // Рейс уже видели — показываем последние данные, даже если табло сейчас сбоит.
   if (state.flight) {
@@ -952,7 +956,7 @@ async function handleUpdate(u) {
   } else if (cmd === "/subscribers" && isOwner(chatId)) {
     await send(chatId, await subscribersText(chatId));
   } else if (cmd === "/notify" && isOwner(chatId)) {
-    await broadcast(`ℹ️ Текущий статус рейса.\n${greeting()}\n\n${statusText()}`);
+    await broadcast(`ℹ️ ${verb() ? `${verb()} ${PERSON}: текущий` : "Текущий"} статус рейса.\n\n${statusText()}`);
     await send(chatId, `✅ Статус разослан подписчикам (${subscribers.size}).`);
   } else if (cmd === "/flight" && isOwner(chatId)) {
     await handleFlightCommand(chatId, rest.join(" "));
