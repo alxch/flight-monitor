@@ -12,7 +12,7 @@
     "flight": "WZ 710",
     "date": "2026-09-28"
   },
-  "problem": null,
+  "problem": "not_found",
   "flight": {
     "kind": "arrival",
     "id": "A3209870",
@@ -31,5 +31,6 @@
     "boardStatus": "Задержан",
     "belt": "6"
   },
-  "alarmEst": "2026-09-28T12:50:00.000"
+  "alarmEst": "2026-09-28T12:50:00.000",
+  "outageSince": "2026-09-27T19:00:07"
 }
