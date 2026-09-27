@@ -1,7 +1,7 @@
 {
   "target": "WZ 710|2026-09-28",
   "subscribers": "AlxP8qK6CEuR0JInet3Yhk8kIF/qMqmP0om/2lR23ZVHQiK5XW7VOVYnnXx2TNcoWv+Bp/S7reyv1OGATi1R4v97uJ2u+VZdvwrPlbvjBhfm9yrjkNgr9ceNbc+2guPlytmqqzEUv5SH5n1p/zkp5Jbr8fQZJGHAjpaZQ0IRr1A9P3w83cNVz44AhJsYf0u+3BS1hwMaRVlW6bdnRngDdEfsbn66xqAz9gWtlgrPPgGB4VHyhmHkJcQ+XZiSObd96X2jbU84UNogLueOwvWWrVyrjtRz",
-  "updateOffset": 124420793,
+  "updateOffset": 124420794,
   "descriptionKey": "Провожаем Элю в Батуми ✈️\n\nЯ слежу за рейсом WZ 709 25.09 в 07:40, Санкт-Петербург → Батуми по табло аэропорта Пулково и присылаю изменения: регистрация, выход, посадка, задержки, вылет.\n\nСейчас: По расписанию.\n\nНажмите «Старт», чтобы получать уведомления.",
   "profile": {
     "name": "Встречаем Элю · WZ 710 28.09 Батуми → СПб",
@@ -22,7 +22,7 @@
     "to": "Санкт-Петербург",
     "airline": "Red Wings",
     "aircraft": "SU95",
-    "registration": "RA89156",
+    "registration": "RA89140",
     "terminal": "1",
     "sta": "2026-09-28T07:15:00.000",
     "eta": "2026-09-28T12:50:00.000",
@@ -31,15 +31,5 @@
     "boardStatus": "Задержан",
     "belt": "6"
   },
-  "alarmEst": "2026-09-28T12:50:00.000",
-  "alarms": [
-    {
-      "id": "mujif42q0",
-      "text": "🚨 Рейс WZ 710 28.09 в 07:15, Батуми → Санкт-Петербург задержан!\nПрилёт ожидается в 12:50 (по расписанию 07:15).\n\nИзменения по рейсу:\n• Статус: Ожидается → Задержан\n• Расчётное время прилёта: 07:15 → 12:50\n\n✈️ WZ 710 28.09 07:15 Батуми → Санкт-Петербург\nRed Wings, SU95 (RA89156)\nСтатус: Задержан\nРасчётное время прилёта: 12:50\nЛента выдачи багажа: 6",
-      "ownerOnly": false,
-      "sent": 1,
-      "nextAt": 1790494936255
-    }
-  ],
-  "alarmsPending": "EkeJgHp9UAUy6cwG5tIWd29nXkWG93htkpn9470uGapFvJ0PrfAPqmZYIuzB7nUfIoKzX6K37NLoR4jti9c/N1HPx9ICD35IqBIFrLiGghDCruP2vpeGe+MZGLM="
+  "alarmEst": "2026-09-28T12:50:00.000"
 }
