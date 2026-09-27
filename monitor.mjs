@@ -744,9 +744,8 @@ async function syncProfile(now) {
       ? `${v} ${PERSON} · ${f.flight} ${ddmm(sched)} ${fromOf(f)} → СПб`
       : `${v} ${PERSON} · ${f.flight} ${ddmm(sched)} → ${toOf(f)}`
     : `Рейс ${flightLabel()}`).slice(0, 64);
-  const short = (f
-    ? `${greeting(f)}. Рейс ${f.flight}, ${ddmm(sched)} ${hhmm(sched)} — статус с ${board} Пулково`
-    : `Рейс ${flightLabel()} — статус с табло Пулково`).slice(0, 120);
+  // Короткое описание видно под именем (превью ссылки, t.me) — рейс уже в имени, не повторяем.
+  const short = `Присылаю изменения с табло Пулково: задержки, посадка, прилёт. Бот многоразовый — для каждой поездки ${PERSON_GEN}.`;
   const description = (at) => [
     greeting(f),
     "",
@@ -780,7 +779,7 @@ async function syncProfile(now) {
 // после следующего /flight syncProfile вернёт в имя номер рейса.
 async function sleepProfile() {
   const name = `Рейс ${PERSON_GEN} ✈️`;
-  const short = `${name} Сейчас бот спит до следующей поездки. Когда в названии появится номер рейса — отправьте /start.`;
+  const short = `Бот многоразовый — для каждой поездки ${PERSON_GEN}. Сейчас спит; когда в названии появится номер рейса — отправьте /start.`;
   const description = [
     name,
     "",
