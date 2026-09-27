@@ -745,8 +745,8 @@ async function syncProfile(now) {
   const board = f && isArrival(f) ? "табло прилёта" : "табло";
   const name = (f
     ? isArrival(f)
-      ? `${v} ${PERSON} · ${ddmm(sched)} ${hhmm(sched)} ${fromOf(f)} → СПб`
-      : `${v} ${PERSON} · ${ddmm(sched)} ${hhmm(sched)} СПб → ${toOf(f)}`
+      ? `${v} ${PERSON} · ${ddmm(sched)} в ${hhmm(sched)} · ${fromOf(f)} → СПб`
+      : `${v} ${PERSON} · ${ddmm(sched)} в ${hhmm(sched)} · СПб → ${toOf(f)}`
     : `Рейс ${PERSON_GEN} · ${targetDate() ? ddmm(targetDate()) : "сегодня/завтра"}`).slice(0, 64);
   // Имя — действие, дата, время и направление; номер рейса — в описании и сообщениях.
   // Короткое описание видно под именем (превью ссылки, t.me) — имя в нём не повторяем.
