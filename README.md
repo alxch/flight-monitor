@@ -1,6 +1,6 @@
 # flight-monitor
 
-Telegram-бот [@provozhaem_elyu_bot](https://t.me/provozhaem_elyu_bot): следит за рейсом на табло аэропорта Пулково —
+Telegram-бот [@elya_flight_bot](https://t.me/elya_flight_bot) (раньше — @provozhaem_elyu_bot): следит за рейсом на табло аэропорта Пулково —
 [вылета](https://pulkovoairport.ru/passengers/departure/) или [прилёта](https://pulkovoairport.ru/passengers/arrival/) —
 и присылает изменения всем подписчикам.
 
@@ -18,7 +18,7 @@ Telegram-бот [@provozhaem_elyu_bot](https://t.me/provozhaem_elyu_bot): сле
    gh workflow run monitor.yml -R alxch/flight-monitor
    ```
 2. Отправить боту рейс туда: `/flight <номер> <дата>`, например `/flight WZ 709 25.09`.
-   Подписчики остаются с прошлой поездки; новым — ссылка https://t.me/provozhaem_elyu_bot.
+   Подписчики остаются с прошлой поездки; новым — ссылка https://t.me/elya_flight_bot.
 3. За 3,5 часа до вылета бот напомнит владельцу вызвать такси.
 4. После вылета — рейс обратно: `/flight <номер> <дата>` (через сутки бот напомнит).
 5. После прилёта бот сам остановится. Выключить раньше: `gh workflow disable monitor.yml -R alxch/flight-monitor`.
@@ -109,6 +109,21 @@ Telegram-бот [@provozhaem_elyu_bot](https://t.me/provozhaem_elyu_bot): сле
 - Вводный текст («Провожаем Элю… Я слежу за рейсом…») — только в описании бота, не в сообщениях.
 - Названия городов не склоняются («Санкт-Петербург → Батуми»), чтобы тексты были правильными для любого рейса.
   Имя задано константами `PERSON` («Элю») и `PERSON_DAT` («Эле») в `monitor.mjs`.
+
+## Переезд на @elya_flight_bot (сентябрь 2026)
+
+Старое имя «provozhaem» не подходит для прилёта, а username в Telegram не меняется — поэтому
+заведён новый бот [@elya_flight_bot](https://t.me/elya_flight_bot). До конца поездки работают оба:
+
+- **новый** (секрет `TELEGRAM_TOKEN_NEW`) — главный: подписка, уведомления, команды владельца;
+- **старый** (секрет `TELEGRAM_TOKEN`, в скрипте `OLD_TELEGRAM_TOKEN`) — шлёт уведомления тем, кто ещё не перешёл,
+  на любые сообщения отвечает статусом и ссылкой на новый бот, админ-команд не принимает.
+
+Подписался в новом — старый ему больше не пишет. Старый один раз разослал объявление (без звука),
+после прилёта шлёт последнее напоминание (со звуком). `/subscribers` показывает, кто ещё не перешёл.
+
+После поездки: удалить старый бот в BotFather (`/deletebot`), `gh secret set TELEGRAM_TOKEN` — токен нового,
+удалить `TELEGRAM_TOKEN_NEW`, убрать из кода и workflow всё про старый бот.
 
 ## Как устроено
 

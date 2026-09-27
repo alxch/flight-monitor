@@ -28,7 +28,9 @@ jobs:
 
       - name: Check flight
         env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          # Переезд на @elya_flight_bot: новый бот — главный, старый работает до конца поездки.
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN_NEW }}
+          OLD_TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           FLIGHT_NUMBER: ${{ vars.FLIGHT_NUMBER || 'WZ 709' }}
           FLIGHT_DATE: ${{ vars.FLIGHT_DATE }}
