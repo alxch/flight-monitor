@@ -1,7 +1,6 @@
 {
   "target": "WZ 710|2026-09-28",
   "subscribers": "CMsfCg0vCmH9qO2dEojiKtQpVEZysCutdIBbIpF5eshoQ81JB18g+cWisOoSTSO/mo7pmi5yDRlfLWbDGJA7ufbgTMI6+ZNP2A4lMpShdcDGN0Q2/H9l44FaPhTedNjR6hBKGCNU+cuLaqdwSwPLYGcXxw62OMZ/JnH0CD0hIaAW2WajMyjwH2Y3a5OeJlQtCkPeX/Enp+vced5lFgQBsR//oTkETXv/ozFB/z2ApcO6tk81Gor2d7b96oCsh2gttysTZ1OjAuEEUI2wU/+litaEo28NCB5jCJl8CD5T",
-  "descriptionKey": "Провожаем Элю в Батуми ✈️\n\nЯ слежу за рейсом WZ 709 25.09 в 07:40, Санкт-Петербург → Батуми по табло аэропорта Пулково и присылаю изменения: регистрация, выход, посадка, задержки, вылет.\n\nСейчас: По расписанию.\n\nНажмите «Старт», чтобы получать уведомления.",
   "config": {
     "flight": "WZ 710",
     "date": "2026-09-28"
@@ -26,8 +25,6 @@
     "belt": "6"
   },
   "alarmEst": "2026-09-28T12:50:00.000",
-  "moveAnnounced": true,
-  "oldUpdateOffset": 124420794,
   "profile": {
     "name": "Встречаем Элю · WZ 710 28.09 Батуми → СПб",
     "short": "Встречаем Элю ✈️ Батуми → Санкт-Петербург. Рейс WZ 710, 28.09 07:15 — статус с табло прилёта Пулково",
