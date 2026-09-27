@@ -37,6 +37,7 @@ const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
 const PERSON = "Элю"; // «Провожаем Элю», «Встречаем Элю»
 const PERSON_DAT = "Эле"; // «вызывать Эле такси»
+const PERSON_GEN = "Эли"; // «Рейс Эли» — имя бота, пока он спит
 const HOME = "Санкт-Петербург";
 
 const BOARD_URLS = {
@@ -464,8 +465,7 @@ async function checkBoard() {
 
     if (isDone(flight)) {
       message = isArrival(flight)
-        ? `🛬 Рейс ${flightLabel(flight)} прибыл.\n\n${body}${describe(flight)}\n\nМониторинг рейса завершён. С возвращением!\n\n` +
-          "Бот засыпает до следующей поездки. Когда появится новый рейс, пришлю сообщение — ничего делать не нужно."
+        ? `🛬 Рейс ${flightLabel(flight)} прибыл.\n\n${body}${describe(flight)}\n\nМониторинг рейса завершён. С возвращением!\n\n${SLEEP_NOTE}`
         : `🛫 Рейс ${flightLabel(flight)} вылетел.\n\n${body}${describe(flight)}\n\nМониторинг рейса завершён. Хорошего полёта!`;
       if (header && header !== "Мониторинг запущен.") message = `${header}\n\n${message}`;
       state.finished = true;
@@ -529,11 +529,16 @@ async function checkOutage(now, found, unavailable, known, errors) {
 // Через сколько дней после завершённого рейса без нового /flight бот останавливается.
 const IDLE_DAYS = 5;
 
+const SLEEP_NOTE = "Бот засыпает до следующей поездки. Когда появится новый рейс, пришлю сообщение — ничего делать не нужно.";
+
 // Остановка бота: сообщение владельцу, флаг shutdown в state.json —
 // по нему workflow отключает себя и не ставит следующий запуск.
-async function shutdown(reason) {
+// notify — сообщить подписчикам, что бот засыпает (после прилёта это уже есть в сообщении о прилёте).
+async function shutdown(reason, { notify = false } = {}) {
   state.shutdown = true;
   console.log(`Остановка: ${reason}`);
+  if (notify) await broadcast(`💤 ${SLEEP_NOTE}`);
+  await sleepProfile();
   if (TELEGRAM_CHAT_ID) {
     await send(TELEGRAM_CHAT_ID, `🛑 ${reason}\nБот остановлен, чтобы не нагружать GitHub Actions.\n\n` +
       "Включить снова — попроси Claude или выполни:\n" +
@@ -770,6 +775,43 @@ async function syncProfile(now) {
   }
 }
 
+// Профиль на время сна (между поездками). Спящий бот не работает и на «Старт» не ответит,
+// а Telegram хранит необработанное нажатие только сутки — поэтому описание говорит, когда вернуться:
+// после следующего /flight syncProfile вернёт в имя номер рейса.
+async function sleepProfile() {
+  const name = `Рейс ${PERSON_GEN} ✈️`;
+  const short = `${name} Сейчас бот спит до следующей поездки. Когда в названии появится номер рейса — отправьте /start.`;
+  const description = [
+    name,
+    "",
+    `Я слежу за рейсами ${PERSON_GEN} по табло аэропорта Пулково и присылаю изменения: ` +
+      "регистрация, посадка, задержки, вылет и прилёт.",
+    "",
+    "Сейчас поездок нет — бот спит и не отвечает, нажатие «Старт» сейчас не запомнится. " +
+      "Когда начнётся поездка, в названии бота появится номер рейса — тогда отправьте /start ещё раз.",
+  ].join("\n");
+  if (DRY_RUN || !TELEGRAM_TOKEN) {
+    console.log(`[dry-run] Профиль сна:\n${name}\n${short}\n${description}\n`);
+    return;
+  }
+  state.profile ??= {};
+  const fields = [
+    ["name", name, () => tg("setMyName", { name })],
+    ["short", short, () => tg("setMyShortDescription", { short_description: short.slice(0, 120) })],
+    ["description", description, () => tg("setMyDescription", { description })],
+  ];
+  for (const [key, text, update] of fields) {
+    if (state.profile[key] === text) continue;
+    try {
+      await update();
+      state.profile[key] = text;
+      console.log(`Профиль бота (${key}) — сон`);
+    } catch (e) {
+      console.warn(e.message);
+    }
+  }
+}
+
 // ---------- Команды бота ----------
 
 // Ответ на сообщение: текущий статус и команда. Вводный текст — в описании бота.
@@ -992,7 +1034,7 @@ async function main() {
         }
         // Страховка: после завершённого рейса долго нет нового /flight — останавливаемся.
         if (!state.shutdown && idleMs > IDLE_DAYS * 86400000)
-          await shutdown(`${IDLE_DAYS} дней после рейса ${flightLabel()} не было команды /flight.`);
+          await shutdown(`${IDLE_DAYS} дней после рейса ${flightLabel()} не было команды /flight.`, { notify: true });
       } else {
         try {
           await checkBoard();
