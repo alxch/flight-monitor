@@ -422,6 +422,7 @@ function resetFlight() {
   delete state.taxiReminded;
   delete state.alarmEst;
   delete state.nameWhen;
+  delete state.sleeping;
   delete state.outageSince;
   delete state.outageNotified;
   alarms = [];
@@ -543,19 +544,32 @@ const IDLE_DAYS = 5;
 
 const SLEEP_NOTE = "Бот засыпает до следующей поездки. Когда появится новый рейс, пришлю сообщение — ничего делать не нужно.";
 
-// Остановка бота: сообщение владельцу, флаг shutdown в state.json —
+// Остановка бота: «спящий» профиль, сообщение владельцу, флаг shutdown в state.json —
 // по нему workflow отключает себя и не ставит следующий запуск.
 // notify — сообщить подписчикам, что бот засыпает (после прилёта это уже есть в сообщении о прилёте).
+// Пока спящий профиль не поставлен (Telegram ограничивает смену имени), бот не засыпает:
+// state.sleeping держит его в работе, и trySleep повторяет попытку.
 async function shutdown(reason, { notify = false } = {}) {
-  state.shutdown = true;
   console.log(`Остановка: ${reason}`);
   if (notify) await broadcast(`💤 ${SLEEP_NOTE}`);
-  await sleepProfile();
-  if (TELEGRAM_CHAT_ID) {
-    await send(TELEGRAM_CHAT_ID, `🛑 ${reason}\nБот остановлен, чтобы не нагружать GitHub Actions.\n\n` +
+  state.sleeping = { reason };
+  await trySleep();
+}
+
+async function trySleep() {
+  const s = state.sleeping;
+  if (s.retryAt && Date.now() < s.retryAt) return;
+  if (!(await sleepProfile())) {
+    console.log(`Засыпание отложено до ${s.retryAt ? new Date(s.retryAt + 3 * 3600000).toISOString().slice(11, 16) + " МСК" : "следующей попытки"}`);
+    return;
+  }
+  delete state.sleeping;
+  state.shutdown = true;
+  if (TELEGRAM_CHAT_ID && !s.ownerNotified) {
+    await send(TELEGRAM_CHAT_ID, `🛑 ${s.reason}\nБот остановлен, чтобы не нагружать GitHub Actions.\n\n` +
       "Включить снова — попроси Claude или выполни:\n" +
       "gh workflow enable monitor.yml -R alxch/flight-monitor\n" +
-      "gh workflow run monitor.yml -R alxch/flight-monitor");
+      "gh workflow run monitor.yml -R alxch/flight-monitor", { disable_notification: true });
   }
 }
 
@@ -751,10 +765,11 @@ async function syncProfile(now) {
 
   // Время в имени — ожидаемое, но меняем его только при сдвиге на NAME_STEP_MIN+:
   // расчётное время гуляет на пару минут, а смену имени Telegram ограничивает.
+  // После посадки/вылета имя не трогаем: следом всё равно ставится «спящее» или имя обратного рейса.
   if (f) {
     const when = whenOf(f);
     const shown = state.nameWhen?.id === f.id ? state.nameWhen.at : null;
-    if (!shown || Math.abs(minutesBetween(when, shown)) >= NAME_STEP_MIN) state.nameWhen = { id: f.id, at: when };
+    if (!shown || (!isDone(f) && Math.abs(minutesBetween(when, shown)) >= NAME_STEP_MIN)) state.nameWhen = { id: f.id, at: when };
   }
   const sched = f && state.nameWhen.at;
   const v = verb(f);
@@ -812,7 +827,7 @@ async function sleepProfile() {
   ].join("\n");
   if (DRY_RUN || !TELEGRAM_TOKEN) {
     console.log(`[dry-run] Профиль сна:\n${name}\n${short}\n${description}\n`);
-    return;
+    return true;
   }
   state.profile ??= {};
   const fields = [
@@ -820,6 +835,7 @@ async function sleepProfile() {
     ["short", short, () => tg("setMyShortDescription", { short_description: short.slice(0, 120) })],
     ["description", description, () => tg("setMyDescription", { description })],
   ];
+  let ok = true;
   for (const [key, text, update] of fields) {
     if (state.profile[key] === text) continue;
     try {
@@ -827,9 +843,14 @@ async function sleepProfile() {
       state.profile[key] = text;
       console.log(`Профиль бота (${key}) — сон`);
     } catch (e) {
+      ok = false;
       console.warn(e.message);
+      // «429 Too Many Requests: retry after N» — раньше повторять бесполезно.
+      const wait = Number(e.message.match(/retry after (\d+)/)?.[1]);
+      if (wait && state.sleeping) state.sleeping.retryAt = Math.max(state.sleeping.retryAt || 0, Date.now() + wait * 1000);
     }
   }
+  return ok;
 }
 
 // ---------- Команды бота ----------
@@ -1041,7 +1062,9 @@ async function main() {
   do {
     if (Date.now() >= nextBoard) {
       nextBoard = Date.now() + BOARD_INTERVAL * 1000;
-      if (state.finished) {
+      if (state.sleeping) {
+        await trySleep(); // засыпаем, как только Telegram разрешит сменить имя
+      } else if (state.finished) {
         if (!RUN_SECONDS) console.log("Рейс завершён, табло не проверяю.");
         const idleSince = state.finishedAt && Date.parse(`${state.finishedAt}Z`);
         const idleMs = idleSince ? Date.parse(`${moscowNow()}Z`) - idleSince : 0;

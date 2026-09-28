@@ -40,5 +40,9 @@
   },
   "finished": true,
   "finishedAt": "2026-09-28T13:39:58",
-  "shutdown": true
+  "sleeping": {
+    "reason": "Эля прилетела, мониторинг завершён.",
+    "ownerNotified": true,
+    "retryAt": 1790628720000
+  }
 }
